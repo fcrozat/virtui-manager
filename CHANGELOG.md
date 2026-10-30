@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `net_info`) landed with 4a8e2f2.
 - Storage commands in machine mode: `pool_ensure`, `vol_info`, `vol_create` (empty or as a qcow2
   overlay of an existing volume), `vol_upload` and `vol_delete`.
+- Domain lifecycle in machine mode: `define` (XML from a file or stdin), `start`, `shutdown`,
+  `destroy` and `undefine` (`--nvram`, `--snapshots`, `--save`). `start` and `shutdown` are
+  idempotent, and `shutdown` answers before the guest is down, as an ACPI request does.
 
 ### Changed
 - `vmc -c "<command>"` exits with the command's status instead of always 0.

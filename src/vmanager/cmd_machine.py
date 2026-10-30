@@ -30,6 +30,7 @@ from .firmware_manager import get_uefi_files
 from .libvirt_utils import get_host_architecture, get_network_info
 from .storage_manager import _safe_get_volume_info, create_storage_pool
 from .utils import sanitize_sensitive_data
+from .vm_actions import force_off_vm, start_vm, stop_vm
 
 # Machine API level. A caller that needs a command added after this level
 # checks it here rather than parsing a version string.
@@ -172,6 +173,15 @@ def _domain_state(domain: libvirt.virDomain) -> str:
         return _DOMAIN_STATE.get(domain.state()[0], "unknown")
     except libvirt.libvirtError:
         return "unknown"
+
+
+def _domain_document(domain: libvirt.virDomain) -> dict[str, Any]:
+    """What a power command says about the domain it acted on."""
+    return {
+        "name": domain.name(),
+        "uuid": domain.UUIDString(),
+        "state": _domain_state(domain),
+    }
 
 
 def _version(conn: libvirt.virConnect) -> str:
@@ -646,7 +656,121 @@ def cmd_vol_delete(conn: libvirt.virConnect, args: list[str]) -> dict[str, Any]:
     return {"deleted": True, "pool": pool_name, "name": volume_name}
 
 
+def cmd_define(conn: libvirt.virConnect, args: list[str]) -> dict[str, Any]:
+    """Define a domain from XML read from a file, or from stdin when that is '-'."""
+    if not args:
+        raise MachineError("bad_argument", "define needs <xml-file|->")
+    _reject_leftover(args[1:], "define")
+    if args[0] == "-":
+        xml = sys.stdin.read()
+    else:
+        if not os.path.exists(args[0]):
+            raise MachineError("no_file", f"no such file: {args[0]}")
+        with open(args[0], encoding="utf-8") as handle:
+            xml = handle.read()
+    if not xml.strip():
+        raise MachineError("bad_argument", "the domain XML is empty")
+
+    try:
+        domain = conn.defineXML(xml)
+    except libvirt.libvirtError as exc:
+        raise MachineError("define_failed", f"cannot define the domain: {exc}") from exc
+    if domain is None:
+        raise MachineError("define_failed", "cannot define the domain")
+    return _domain_document(domain)
+
+
+def cmd_start(conn: libvirt.virConnect, args: list[str]) -> dict[str, Any]:
+    """Boot a domain; one that is already running is answered as it is."""
+    if not args:
+        raise MachineError("bad_argument", "start needs a domain name")
+    name, args = args[0], args[1:]
+    _reject_leftover(args, "start")
+    domain = _domain(conn, name)
+    if not domain.isActive():
+        try:
+            # start_vm checks that the domain's disks are there before booting it,
+            # and reports a missing volume as a plain Exception rather than a libvirt one.
+            start_vm(domain)
+        except Exception as exc:
+            raise MachineError("start_failed", f"cannot start domain '{name}': {exc}") from exc
+    return _domain_document(domain)
+
+
+def cmd_shutdown(conn: libvirt.virConnect, args: list[str]) -> dict[str, Any]:
+    """Press the power button and return; the guest takes its time to go down."""
+    if not args:
+        raise MachineError("bad_argument", "shutdown needs a domain name")
+    name, args = args[0], args[1:]
+    _reject_leftover(args, "shutdown")
+    domain = _domain(conn, name)
+    if domain.isActive():
+        try:
+            stop_vm(domain)
+        except libvirt.libvirtError as exc:
+            raise MachineError(
+                "shutdown_failed", f"cannot shut down domain '{name}': {exc}"
+            ) from exc
+    return _domain_document(domain)
+
+
+def cmd_destroy(conn: libvirt.virConnect, args: list[str]) -> dict[str, Any]:
+    """Power a domain off without asking the guest."""
+    if not args:
+        raise MachineError("bad_argument", "destroy needs a domain name")
+    name, args = args[0], args[1:]
+    _reject_leftover(args, "destroy")
+    domain = _domain(conn, name)
+    if domain.isActive():
+        try:
+            force_off_vm(domain)
+        except libvirt.libvirtError as exc:
+            raise MachineError(
+                "destroy_failed", f"cannot force off domain '{name}': {exc}"
+            ) from exc
+    return _domain_document(domain)
+
+
+def cmd_undefine(conn: libvirt.virConnect, args: list[str]) -> dict[str, Any]:
+    """Forget a domain, optionally with its UEFI variables, snapshots and saved state."""
+    if not args:
+        raise MachineError(
+            "bad_argument", "undefine needs <domain> [--nvram] [--snapshots] [--save]"
+        )
+    name, args = args[0], args[1:]
+    with_nvram = _take_flag(args, "nvram")
+    with_snapshots = _take_flag(args, "snapshots")
+    with_saved = _take_flag(args, "save")
+    _reject_leftover(args, "undefine")
+    domain = _domain(conn, name)
+    if domain.isActive():
+        raise MachineError(
+            "undefine_failed", f"domain '{name}' is still running; shut it down first"
+        )
+
+    flags = 0
+    if with_nvram:
+        flags |= libvirt.VIR_DOMAIN_UNDEFINE_NVRAM
+    if with_snapshots:
+        flags |= libvirt.VIR_DOMAIN_UNDEFINE_SNAPSHOTS_METADATA
+    if with_saved:
+        flags |= libvirt.VIR_DOMAIN_UNDEFINE_MANAGED_SAVE
+    try:
+        if flags:
+            domain.undefineFlags(flags)
+        else:
+            domain.undefine()
+    except libvirt.libvirtError as exc:
+        raise MachineError("undefine_failed", f"cannot undefine domain '{name}': {exc}") from exc
+    return {"undefined": True, "name": name}
+
+
 _COMMANDS: dict[str, Callable[[libvirt.virConnect, list[str]], Any]] = {
+    "define": cmd_define,
+    "start": cmd_start,
+    "shutdown": cmd_shutdown,
+    "destroy": cmd_destroy,
+    "undefine": cmd_undefine,
     "capabilities": cmd_capabilities,
     "host_info": cmd_host_info,
     "list": cmd_list,

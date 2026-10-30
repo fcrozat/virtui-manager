@@ -425,6 +425,7 @@ document; `2` the command line was wrong.
 | `no_domain` / `no_pool` / `no_volume` / `no_network` / `no_file` | what was named does not exist |
 | `pool_path_conflict` | `pool_ensure --path` disagrees with the pool that already exists |
 | `pool_ensure_failed` / `vol_create_failed` / `vol_delete_failed` / `upload_failed` | libvirt refused the operation |
+| `define_failed` / `start_failed` / `shutdown_failed` / `destroy_failed` / `undefine_failed` | libvirt refused that power or definition operation |
 | `capabilities_failed` / `host_info_failed` | the hypervisor would not describe itself |
 | `libvirt_error` | any other libvirt failure |
 | `internal_error` | a bug — the message names the exception |
@@ -446,6 +447,11 @@ Options come after the positional arguments, written `--name value`.
 | `vol_create <pool> <name> --size <size> [--backing <pool/volume\|path>] [--format qcow2]` | the new volume; with `--backing` a qcow2 overlay |
 | `vol_upload <pool> <volume> <local-path> [--offset <size>]` | the volume and the bytes copied |
 | `vol_delete <pool> <volume> [--snapshots]` | `deleted: true` |
+| `define <xml-file\|->` | the domain as libvirt now defines it; `-` reads the XML from stdin |
+| `start <domain>` | boots it; a domain already running is answered as it is |
+| `shutdown <domain>` | the ACPI power button — answers at once, read `dominfo` for the state |
+| `destroy <domain>` | power off without asking the guest |
+| `undefine <domain> [--nvram] [--snapshots] [--save]` | `undefined: true`; refused while the domain is running |
 
 Sizes are written `4096`, `512M`, `20G`, `1T` (spaces and a trailing `B` are allowed).
 Volume paths are those of the **hypervisor**, not of the machine running `vmc`, which is
@@ -460,6 +466,19 @@ vmc --json --server ryzen9 -c "vol_upload vm-sidekick leap-15.6 ./Leap-15.6.qcow
 vmc --json --server ryzen9 -c "vol_delete vm-sidekick leap-15.6"
 ```
 
+A domain is driven the same way. `shutdown` is a request, not a result: the document
+still says `running`, because the guest has only been asked — read `dominfo` until it
+says `shutoff`. `start` and `shutdown` do nothing to a domain that is already in the
+state you asked for, so a script does not have to check first.
+
+```bash
+vmc --json --server ryzen9 -c "define /tmp/web-01.xml"
+vmc --json --server ryzen9 -c "start web-01"
+vmc --json --server ryzen9 -c "dominfo web-01"      # state, ipv4, disks, nvram
+vmc --json --server ryzen9 -c "shutdown web-01"
+vmc --json --server ryzen9 -c "undefine web-01 --nvram"
+```
+
 ## Command Reference Summary
 
 | Category | Commands |
@@ -471,6 +490,6 @@ vmc --json --server ryzen9 -c "vol_delete vm-sidekick leap-15.6"
 | Backups | `backup_create`, `backup_list`, `backup_status`, `backup_restore`, `backup_cleanup` |
 | Networking | `list_networks`, `net_start`, `net_stop`, `net_delete`, `net_info`, `net_autostart` |
 | Storage | `list_pool`, `list_unused_volumes` |
-| Machine mode (`--json`) | `capabilities`, `host_info`, `list`, `dominfo`, `pool_info`, `net_info`, `pool_ensure`, `vol_info`, `vol_create`, `vol_upload`, `vol_delete` |
+| Machine mode (`--json`) | `capabilities`, `host_info`, `list`, `dominfo`, `pool_info`, `net_info`, `pool_ensure`, `vol_info`, `vol_create`, `vol_upload`, `vol_delete`, `define`, `start`, `shutdown`, `destroy`, `undefine` |
 | Pipelines | `pipeline` (with `|` chaining) |
 | Shell/Utils | `bash`, `history`, `!<number>`, `quit`, `help` |

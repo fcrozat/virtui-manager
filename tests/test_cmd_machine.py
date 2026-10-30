@@ -486,6 +486,196 @@ class TestSizes(unittest.TestCase):
                 self.assertEqual("bad_argument", caught.exception.code)
 
 
+class TestLifecycleCommands(unittest.TestCase):
+    def test_define_reads_the_xml_from_a_file_and_reports_the_domain(self):
+        conn = make_connection()
+        conn.defineXML.return_value = make_domain(name="new-vm")
+
+        with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as handle:
+            handle.write(DOMAIN_XML)
+            path = handle.name
+        try:
+            code, document = run_command(f"define {path}", conn)
+        finally:
+            os.unlink(path)
+
+        self.assertEqual(0, code)
+        self.assertEqual(DOMAIN_XML, conn.defineXML.call_args[0][0])
+        self.assertEqual("new-vm", document["name"])
+        self.assertEqual("running", document["state"])
+
+    def test_define_can_read_the_xml_from_stdin(self):
+        conn = make_connection()
+        conn.defineXML.return_value = make_domain()
+
+        with patch.object(sys, "stdin", io.StringIO(DOMAIN_XML)):
+            code, document = run_command("define -", conn)
+
+        self.assertEqual(0, code)
+        self.assertEqual(DOMAIN_XML, conn.defineXML.call_args[0][0])
+
+    def test_define_of_a_file_that_is_not_there_is_refused(self):
+        code, document = run_command("define /no/such/vm.xml", make_connection())
+
+        self.assertEqual(1, code)
+        self.assertEqual("no_file", document["error"]["code"])
+
+    def test_define_of_a_domain_libvirt_refuses_carries_the_reason(self):
+        conn = make_connection()
+        conn.defineXML.side_effect = libvirt.libvirtError("unknown machine type 'nope'")
+
+        with tempfile.NamedTemporaryFile("w", suffix=".xml", delete=False) as handle:
+            handle.write(DOMAIN_XML)
+            path = handle.name
+        try:
+            code, document = run_command(f"define {path}", conn)
+        finally:
+            os.unlink(path)
+
+        self.assertEqual(1, code)
+        self.assertEqual("define_failed", document["error"]["code"])
+        self.assertIn("unknown machine type", document["error"]["message"])
+
+    def test_start_boots_a_domain_that_is_off(self):
+        domain = make_domain(state=libvirt.VIR_DOMAIN_SHUTOFF, active=False)
+        conn = make_connection(domains=[domain])
+
+        with patch.object(cmd_machine, "start_vm") as boot:
+            code, document = run_command("start vm", conn)
+
+        self.assertEqual(0, code)
+        boot.assert_called_once_with(domain)
+        self.assertEqual("shutoff", document["state"])
+
+    def test_start_of_a_running_domain_answers_with_the_domain_and_touches_nothing(self):
+        domain = make_domain()
+        conn = make_connection(domains=[domain])
+
+        with patch.object(cmd_machine, "start_vm") as boot:
+            code, document = run_command("start vm", conn)
+
+        self.assertEqual(0, code)
+        boot.assert_not_called()
+        self.assertEqual("running", document["state"])
+
+    def test_a_domain_whose_disk_is_missing_fails_to_start_with_that_said(self):
+        domain = make_domain(state=libvirt.VIR_DOMAIN_SHUTOFF, active=False)
+        conn = make_connection(domains=[domain])
+
+        with patch.object(cmd_machine, "start_vm", side_effect=Exception("volume gone")):
+            code, document = run_command("start vm", conn)
+
+        self.assertEqual(1, code)
+        self.assertEqual("start_failed", document["error"]["code"])
+        self.assertIn("volume gone", document["error"]["message"])
+
+    def test_shutdown_asks_the_guest_over_acpi(self):
+        domain = make_domain()
+        conn = make_connection(domains=[domain])
+
+        with patch.object(cmd_machine, "stop_vm") as power_off:
+            code, document = run_command("shutdown vm", conn)
+
+        self.assertEqual(0, code)
+        power_off.assert_called_once_with(domain)
+        self.assertEqual("running", document["state"])
+
+    def test_shutdown_of_a_domain_that_is_off_leaves_it_off(self):
+        domain = make_domain(state=libvirt.VIR_DOMAIN_SHUTOFF, active=False)
+        conn = make_connection(domains=[domain])
+
+        with patch.object(cmd_machine, "stop_vm") as power_off:
+            code, _ = run_command("shutdown vm", conn)
+
+        self.assertEqual(0, code)
+        power_off.assert_not_called()
+
+    def test_a_shutdown_libvirt_refuses_is_reported_as_such(self):
+        domain = make_domain()
+        conn = make_connection(domains=[domain])
+
+        with patch.object(
+            cmd_machine, "stop_vm", side_effect=libvirt.libvirtError("acpi disabled")
+        ):
+            code, document = run_command("shutdown vm", conn)
+
+        self.assertEqual(1, code)
+        self.assertEqual("shutdown_failed", document["error"]["code"])
+
+    def test_destroy_powers_the_domain_off_without_asking_the_guest(self):
+        domain = make_domain()
+        conn = make_connection(domains=[domain])
+
+        with patch.object(cmd_machine, "force_off_vm") as plug:
+            code, _ = run_command("destroy vm", conn)
+
+        self.assertEqual(0, code)
+        plug.assert_called_once_with(domain)
+
+    def test_a_destroy_libvirt_refuses_is_reported_as_such(self):
+        domain = make_domain()
+        conn = make_connection(domains=[domain])
+
+        with patch.object(
+            cmd_machine, "force_off_vm", side_effect=libvirt.libvirtError("domain is not running")
+        ):
+            code, document = run_command("destroy vm", conn)
+
+        self.assertEqual(1, code)
+        self.assertEqual("destroy_failed", document["error"]["code"])
+
+    def test_undefine_forgets_a_domain_that_is_off(self):
+        domain = make_domain(state=libvirt.VIR_DOMAIN_SHUTOFF, active=False)
+        conn = make_connection(domains=[domain])
+
+        code, document = run_command("undefine vm", conn)
+
+        self.assertEqual(0, code)
+        self.assertTrue(document["undefined"])
+        domain.undefine.assert_called_once_with()
+        domain.undefineFlags.assert_not_called()
+
+    def test_undefine_takes_the_uefi_variables_only_when_asked_to(self):
+        domain = make_domain(state=libvirt.VIR_DOMAIN_SHUTOFF, active=False)
+        conn = make_connection(domains=[domain])
+
+        run_command("undefine vm --nvram", conn)
+
+        domain.undefineFlags.assert_called_once_with(libvirt.VIR_DOMAIN_UNDEFINE_NVRAM)
+
+    def test_undefine_can_take_snapshots_and_saved_state_as_well(self):
+        domain = make_domain(state=libvirt.VIR_DOMAIN_SHUTOFF, active=False)
+        conn = make_connection(domains=[domain])
+
+        run_command("undefine vm --nvram --snapshots --save", conn)
+
+        domain.undefineFlags.assert_called_once_with(
+            libvirt.VIR_DOMAIN_UNDEFINE_NVRAM
+            | libvirt.VIR_DOMAIN_UNDEFINE_SNAPSHOTS_METADATA
+            | libvirt.VIR_DOMAIN_UNDEFINE_MANAGED_SAVE
+        )
+
+    def test_a_running_domain_is_not_undefinable(self):
+        conn = make_connection(domains=[make_domain()])
+
+        code, document = run_command("undefine vm --nvram", conn)
+
+        self.assertEqual(1, code)
+        self.assertEqual("undefine_failed", document["error"]["code"])
+        self.assertIn("still running", document["error"]["message"])
+
+    def test_a_domain_libvirt_will_not_release_is_reported_with_its_reason(self):
+        domain = make_domain(state=libvirt.VIR_DOMAIN_SHUTOFF, active=False)
+        domain.undefine.side_effect = libvirt.libvirtError("domain has saved state")
+        conn = make_connection(domains=[domain])
+
+        code, document = run_command("undefine vm", conn)
+
+        self.assertEqual(1, code)
+        self.assertEqual("undefine_failed", document["error"]["code"])
+        self.assertIn("saved state", document["error"]["message"])
+
+
 class TestStorageCommands(unittest.TestCase):
     def test_pool_ensure_reports_an_existing_pool_without_creating_one(self):
         conn = make_pool_connection(pools=[make_pool("vm-sidekick")])
