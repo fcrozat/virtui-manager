@@ -387,6 +387,66 @@ Snapshot 'pre-update' created for 'web-01'.
 (Localhost) > select re:web-.* | stop | snapshot create maintenance-$(date) | start
 ```
 
+## Machine-Readable Mode
+
+`vmc --json` answers one command with one JSON document on stdout, for programs and
+scripts rather than people. Nothing else reaches stdout — no intro, no colour, no
+progress — and the interactive shell is never built.
+
+```bash
+vmc --json --server local -c "list"
+[{"name": "web-01", "state": "running", "uuid": "..."}]
+```
+
+*   **`--json`** — machine mode. It needs `-c "<command>"`; without one it answers
+    `{"error": {"code": "missing_command", ...}}` and exits 2.
+*   **`--server <name>`** — which configured server to run against. Required when the
+    configuration holds more than one.
+*   **`--config <path>`** — an alternative configuration file, instead of
+    `~/.config/virtui-manager/config.json`.
+
+**Exit codes**: `0` the command worked; `1` it failed, and stdout holds the error
+document; `2` the command line was wrong.
+
+**Errors** have the same shape as results, so a caller reads one thing:
+
+```json
+{"error": {"code": "no_domain", "message": "no domain named 'ghost'"}}
+```
+
+| Code | Meaning |
+|------|---------|
+| `unknown_command` | not a machine command — the message lists the ones that are |
+| `bad_command` | the command line could not be split, e.g. an unbalanced quote |
+| `empty_command` | `-c ""` |
+| `bad_argument` | a missing, malformed, or unrecognised argument |
+| `unknown_server` / `no_server` / `bad_configuration` | the server to run against could not be chosen |
+| `connection_failed` | libvirt refused the URI |
+| `no_domain` / `no_pool` / `no_volume` / `no_network` / `no_file` | what was named does not exist |
+| `capabilities_failed` / `host_info_failed` | the hypervisor would not describe itself |
+| `libvirt_error` | any other libvirt failure |
+| `internal_error` | a bug — the message names the exception |
+
+Options come after the positional arguments, written `--name value`.
+
+### Machine Commands
+
+| Command | Answers |
+|---------|---------|
+| `capabilities` | API level, libvirt version, host and guest architectures, KVM, firmwares |
+| `host_info` | CPU model, core count, memory in MiB, KVM |
+| `list` | every domain, running or not, with state and UUID |
+| `dominfo <domain>` | state, MACs, IPv4, disks, NVRAM path |
+| `pool_info <pool>` | state, path, autostart, capacity |
+| `net_info <network>` | bridge, forward mode, DHCP range, whether it is active |
+
+### Example
+
+```bash
+vmc --json --server ryzen9 -c "capabilities"
+vmc --json --server ryzen9 -c "dominfo web-01"
+```
+
 ## Command Reference Summary
 
 | Category | Commands |
@@ -398,5 +458,6 @@ Snapshot 'pre-update' created for 'web-01'.
 | Backups | `backup_create`, `backup_list`, `backup_status`, `backup_restore`, `backup_cleanup` |
 | Networking | `list_networks`, `net_start`, `net_stop`, `net_delete`, `net_info`, `net_autostart` |
 | Storage | `list_pool`, `list_unused_volumes` |
+| Machine mode (`--json`) | `capabilities`, `host_info`, `list`, `dominfo`, `pool_info`, `net_info` |
 | Pipelines | `pipeline` (with `|` chaining) |
 | Shell/Utils | `bash`, `history`, `!<number>`, `quit`, `help` |
