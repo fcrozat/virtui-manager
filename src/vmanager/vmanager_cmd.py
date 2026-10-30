@@ -4143,13 +4143,51 @@ def main():
     # upload_file) otherwise leak as C-level stderr noise.
     register_error_handler()
 
-    parser = argparse.ArgumentParser(description="Virtui Manager CLI")
+    class MachineArgumentParser(argparse.ArgumentParser):
+        """Keeps the machine contract: with --json, stdout always holds one
+        JSON document, even when argparse rejects the command line itself."""
+
+        def error(self, message):  # argparse prints usage to stderr and exits 2
+            if "--json" in sys.argv:
+                from . import cmd_machine
+
+                cmd_machine.emit({"error": {"code": "bad_usage", "message": message}})
+            super().error(message)
+
+    parser = MachineArgumentParser(description="Virtui Manager CLI")
     parser.add_argument(
         "-c",
         "--command",
         help="Execute a single command non-interactively and exit",
     )
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        help="With -c: print one JSON document and exit 0 or 1 instead of human-readable text",
+    )
+    parser.add_argument(
+        "--server",
+        help="With --json: name of the configured server to run the command on",
+    )
+    parser.add_argument(
+        "--config",
+        help="With --json: configuration file to read instead of the standard ones",
+    )
     args = parser.parse_args()
+
+    if args.json:
+        # Machine mode does not build the shell at all: no intro, no colour,
+        # no log wrapper around stdout, so the JSON document is the only thing
+        # a caller has to read. See cmd_machine for the command set.
+        from . import cmd_machine
+
+        if args.command is None:
+            parser.print_usage(sys.stderr)
+            cmd_machine.emit(
+                {"error": {"code": "bad_usage", "message": "--json needs -c <command>"}}
+            )
+            return 2
+        return cmd_machine.run(args.command, server=args.server, config_file=args.config)
 
     # Show help if -c/--command passed with no value
     if args.command is None and ("-c" in sys.argv or "--command" in sys.argv):

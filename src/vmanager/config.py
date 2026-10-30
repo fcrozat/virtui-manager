@@ -86,13 +86,22 @@ def deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def load_config() -> dict:
+def load_config(config_file=None) -> dict:
     """
     Loads the configuration from the first found config file.
     If no config file is found, returns the default configuration.
     Merges the loaded configuration with default values to ensure all keys are present.
+
+    config_file names one file to read instead of the standard locations, which
+    is how `vmc --json --config <file>` runs against a configuration of its own.
     """
-    config_paths = get_config_paths()
+    if config_file is not None:
+        explicit = Path(config_file).expanduser()
+        if not explicit.exists():
+            raise FileNotFoundError(f"configuration file not found: {explicit}")
+        config_paths = [explicit]
+    else:
+        config_paths = get_config_paths()
     config_path = None
     user_config = {}
 
