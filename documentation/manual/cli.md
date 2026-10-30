@@ -423,6 +423,8 @@ document; `2` the command line was wrong.
 | `unknown_server` / `no_server` / `bad_configuration` | the server to run against could not be chosen |
 | `connection_failed` | libvirt refused the URI |
 | `no_domain` / `no_pool` / `no_volume` / `no_network` / `no_file` | what was named does not exist |
+| `pool_path_conflict` | `pool_ensure --path` disagrees with the pool that already exists |
+| `pool_ensure_failed` / `vol_create_failed` / `vol_delete_failed` / `upload_failed` | libvirt refused the operation |
 | `capabilities_failed` / `host_info_failed` | the hypervisor would not describe itself |
 | `libvirt_error` | any other libvirt failure |
 | `internal_error` | a bug — the message names the exception |
@@ -439,12 +441,23 @@ Options come after the positional arguments, written `--name value`.
 | `dominfo <domain>` | state, MACs, IPv4, disks, NVRAM path |
 | `pool_info <pool>` | state, path, autostart, capacity |
 | `net_info <network>` | bridge, forward mode, DHCP range, whether it is active |
+| `pool_ensure <name> [--path <dir>]` | the pool, with `created: true` when it had to be made |
+| `vol_info <pool> <volume>` or `vol_info <path>` | format, capacity, allocation, backing volume |
+| `vol_create <pool> <name> --size <size> [--backing <pool/volume\|path>] [--format qcow2]` | the new volume; with `--backing` a qcow2 overlay |
+| `vol_upload <pool> <volume> <local-path> [--offset <size>]` | the volume and the bytes copied |
+| `vol_delete <pool> <volume> [--snapshots]` | `deleted: true` |
 
-### Example
+Sizes are written `4096`, `512M`, `20G`, `1T` (spaces and a trailing `B` are allowed).
+Volume paths are those of the **hypervisor**, not of the machine running `vmc`, which is
+why sending a base image over is `vol_create` at the right size and then `vol_upload`.
+
+### Example: a base image to a remote hypervisor
 
 ```bash
-vmc --json --server ryzen9 -c "capabilities"
-vmc --json --server ryzen9 -c "dominfo web-01"
+vmc --json --server ryzen9 -c "pool_ensure vm-sidekick"
+vmc --json --server ryzen9 -c "vol_create vm-sidekick leap-15.6 --size 20G"
+vmc --json --server ryzen9 -c "vol_upload vm-sidekick leap-15.6 ./Leap-15.6.qcow2"
+vmc --json --server ryzen9 -c "vol_delete vm-sidekick leap-15.6"
 ```
 
 ## Command Reference Summary
@@ -458,6 +471,6 @@ vmc --json --server ryzen9 -c "dominfo web-01"
 | Backups | `backup_create`, `backup_list`, `backup_status`, `backup_restore`, `backup_cleanup` |
 | Networking | `list_networks`, `net_start`, `net_stop`, `net_delete`, `net_info`, `net_autostart` |
 | Storage | `list_pool`, `list_unused_volumes` |
-| Machine mode (`--json`) | `capabilities`, `host_info`, `list`, `dominfo`, `pool_info`, `net_info` |
+| Machine mode (`--json`) | `capabilities`, `host_info`, `list`, `dominfo`, `pool_info`, `net_info`, `pool_ensure`, `vol_info`, `vol_create`, `vol_upload`, `vol_delete` |
 | Pipelines | `pipeline` (with `|` chaining) |
 | Shell/Utils | `bash`, `history`, `!<number>`, `quit`, `help` |

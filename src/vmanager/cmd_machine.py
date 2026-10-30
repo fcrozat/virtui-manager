@@ -15,16 +15,20 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import re
 import shlex
 import sys
 import xml.etree.ElementTree as ET
 from typing import Any, Callable
+from xml.sax.saxutils import escape
 
 import libvirt
 
 from .config import load_config
 from .firmware_manager import get_uefi_files
 from .libvirt_utils import get_host_architecture, get_network_info
+from .storage_manager import _safe_get_volume_info, create_storage_pool
 from .utils import sanitize_sensitive_data
 
 # Machine API level. A caller that needs a command added after this level
@@ -52,6 +56,13 @@ _POOL_STATE = {
     4: "inaccessible",
     5: "deleting",
 }
+
+# Sizes are typed by a human ("20G") and handed to libvirt in bytes.
+_SIZE_PATTERN = re.compile(r"(\d+)\s*([KMGT]?)B?")
+_SIZE_UNITS = {"": 1, "K": 1024, "M": 1024**2, "G": 1024**3, "T": 1024**4}
+
+# Where libvirt puts the pool it calls 'default'.
+_DEFAULT_POOL_PATH = "/var/lib/libvirt/images"
 
 # Where to look for a guest address, in the order that works without a
 # guest agent: the network's DHCP lease, then the agent, then ARP.
@@ -249,6 +260,120 @@ def _disks(root: ET.Element) -> list[dict[str, Any]]:
     return disks
 
 
+def _parse_size(value: Any, what: str = "size") -> int:
+    """Read '20G', '512M' or a plain byte count as bytes."""
+    match = _SIZE_PATTERN.fullmatch(str(value or "").strip().upper())
+    if not match:
+        raise MachineError(
+            "bad_argument", f"invalid {what} '{value}', expected e.g. 20G, 512M or 4096"
+        )
+    number = int(match.group(1)) * _SIZE_UNITS[match.group(2)]
+    if number <= 0:
+        raise MachineError("bad_argument", f"{what} must be greater than zero, got '{value}'")
+    return number
+
+
+def _pool_by_name(conn: libvirt.virConnect, name: str):
+    try:
+        return conn.storagePoolLookupByName(name)
+    except libvirt.libvirtError as exc:
+        raise MachineError("no_pool", f"no storage pool named '{name}'") from exc
+
+
+def _volume_by_name(pool, name: str):
+    try:
+        return pool.storageVolLookupByName(name)
+    except libvirt.libvirtError as exc:
+        raise MachineError(
+            "no_volume", f"no volume named '{name}' in pool '{pool.name()}'"
+        ) from exc
+
+
+def _volume_at(conn: libvirt.virConnect, spec: str):
+    """Find a volume written as '<pool>/<volume>' or as a path on the hypervisor."""
+    if spec.startswith("/"):
+        try:
+            return conn.storageVolLookupByPath(spec)
+        except libvirt.libvirtError as exc:
+            raise MachineError("no_volume", f"no volume at path '{spec}'") from exc
+    pool_name, separator, volume_name = spec.partition("/")
+    if not separator or not volume_name:
+        raise MachineError(
+            "bad_argument",
+            f"invalid volume '{spec}', expected <pool>/<volume> or a path on the hypervisor",
+        )
+    return _volume_by_name(_pool_by_name(conn, pool_name), volume_name)
+
+
+def _pool_document(pool) -> dict[str, Any]:
+    info = pool.info()
+    target = ET.fromstring(pool.XMLDesc(0)).find("target/path")
+    return {
+        "name": pool.name(),
+        "state": _POOL_STATE.get(info[0], "unknown"),
+        "path": target.text if target is not None else None,
+        "autostart": bool(pool.autostart()),
+        "capacity_bytes": info[1],
+        "allocation_bytes": info[2],
+        "available_bytes": info[3],
+    }
+
+
+def _volume_format(vol) -> str | None:
+    """The on-disk format a volume records for itself."""
+    try:
+        root = ET.fromstring(vol.XMLDesc(0))
+    except libvirt.libvirtError:
+        return None
+    node = root.find("target/format")
+    return node.get("type") if node is not None else None
+
+
+def _volume_document(vol) -> dict[str, Any]:
+    _, capacity, allocation = _safe_get_volume_info(vol)
+    root = ET.fromstring(vol.XMLDesc(0))
+    format_node = root.find("target/format")
+    backing_node = root.find("backingStore")
+    try:
+        pool_name = vol.storagePoolLookupByVolume().name()
+    except libvirt.libvirtError:
+        pool_name = ""
+    document = {
+        "pool": pool_name,
+        "name": vol.name(),
+        "path": vol.path(),
+        "format": format_node.get("type") if format_node is not None else None,
+        "capacity_bytes": capacity,
+        "allocation_bytes": allocation,
+    }
+    if backing_node is not None and (backing_node.findtext("path") or ""):
+        # libvirt writes the format either as a <format> child or as an attribute of
+        # <backingStore>, depending on how the volume was created.
+        format_node = backing_node.find("format")
+        document["backing"] = {
+            "path": backing_node.findtext("path").strip(),
+            "format": (format_node.get("type") if format_node is not None else None)
+            or backing_node.get("format"),
+        }
+    return document
+
+
+def _start_pool(pool) -> None:
+    """Bring a pool up, building its target directory the first time."""
+    try:
+        pool.create(0)
+        return
+    except libvirt.libvirtError as exc:
+        first = exc
+    try:
+        pool.build(0)
+        pool.create(0)
+    except libvirt.libvirtError as exc:
+        raise MachineError(
+            "pool_ensure_failed", f"cannot start storage pool '{pool.name()}': {exc or first}"
+        ) from exc
+
+
 #
 # Commands
 #
@@ -325,21 +450,7 @@ def cmd_pool_info(conn: libvirt.virConnect, args: list[str]) -> dict[str, Any]:
     if not args:
         raise MachineError("bad_argument", "pool_info needs a pool name")
     _reject_leftover(args[1:], "pool_info")
-    try:
-        pool = conn.storagePoolLookupByName(args[0])
-    except libvirt.libvirtError as exc:
-        raise MachineError("no_pool", f"no storage pool named '{args[0]}'") from exc
-    info = pool.info()
-    target = ET.fromstring(pool.XMLDesc(0)).find("target/path")
-    return {
-        "name": pool.name(),
-        "state": _POOL_STATE.get(info[0], "unknown"),
-        "path": target.text if target is not None else None,
-        "autostart": bool(pool.autostart()),
-        "capacity_bytes": info[1],
-        "allocation_bytes": info[2],
-        "available_bytes": info[3],
-    }
+    return _pool_document(_pool_by_name(conn, args[0]))
 
 
 def cmd_net_info(conn: libvirt.virConnect, args: list[str]) -> dict[str, Any]:
@@ -357,6 +468,184 @@ def cmd_net_info(conn: libvirt.virConnect, args: list[str]) -> dict[str, Any]:
     return info
 
 
+def cmd_pool_ensure(conn: libvirt.virConnect, args: list[str]) -> dict[str, Any]:
+    """Make a directory pool exist and run, creating it where it is missing."""
+    if not args:
+        raise MachineError("bad_argument", "pool_ensure needs <name> [--path <dir>]")
+    name, args = args[0], args[1:]
+    path = _take_option(args, "path")
+    _reject_leftover(args, "pool_ensure")
+
+    try:
+        pool = conn.storagePoolLookupByName(name)
+    except libvirt.libvirtError as exc:
+        if exc.get_error_code() != libvirt.VIR_ERR_NO_STORAGE_POOL:
+            raise MachineError(
+                "pool_ensure_failed", f"cannot look up storage pool '{name}': {exc}"
+            ) from exc
+        pool = None
+
+    created = pool is None
+    if created:
+        target = path or (
+            _DEFAULT_POOL_PATH if name == "default" else f"{_DEFAULT_POOL_PATH}/{name}"
+        )
+        try:
+            pool = create_storage_pool(conn, name, "dir", target)
+        except libvirt.libvirtError as exc:
+            raise MachineError(
+                "pool_ensure_failed", f"cannot create storage pool '{name}': {exc}"
+            ) from exc
+        if pool is None:
+            raise MachineError(
+                "pool_ensure_failed", f"cannot create storage pool '{name}' at '{target}'"
+            )
+    else:
+        document = _pool_document(pool)
+        if path and document["path"] and os.path.realpath(path) != document["path"]:
+            raise MachineError(
+                "pool_path_conflict",
+                f"storage pool '{name}' already uses '{document['path']}', not '{path}'",
+            )
+        if document["state"] != "running":
+            _start_pool(pool)
+
+    document = _pool_document(pool)
+    document["created"] = created
+    return document
+
+
+def cmd_vol_info(conn: libvirt.virConnect, args: list[str]) -> dict[str, Any]:
+    """Report one volume, named '<pool>/<volume>', as a pool and volume, or by path."""
+    if not args:
+        raise MachineError("bad_argument", "vol_info needs <pool> <volume>")
+    _reject_leftover(args[2:], "vol_info")
+    if len(args) == 1:
+        return _volume_document(_volume_at(conn, args[0]))
+    return _volume_document(_volume_by_name(_pool_by_name(conn, args[0]), args[1]))
+
+
+def cmd_vol_create(conn: libvirt.virConnect, args: list[str]) -> dict[str, Any]:
+    """Create a volume, empty or as a qcow2 overlay of one that already exists."""
+    if len(args) < 2:
+        raise MachineError(
+            "bad_argument",
+            "vol_create needs <pool> <name> --size <size> "
+            "[--backing <pool/volume|path>] [--format qcow2]",
+        )
+    pool_name, name, args = args[0], args[1], args[2:]
+    size = _take_option(args, "size")
+    backing = _take_option(args, "backing")
+    volume_format = _take_option(args, "format") or ("qcow2" if backing else "raw")
+    _reject_leftover(args, "vol_create")
+
+    pool = _pool_by_name(conn, pool_name)
+    if _pool_document(pool)["state"] != "running":
+        _start_pool(pool)
+
+    backing_path = backing_format = None
+    if backing:
+        backing_vol = _volume_at(conn, backing)
+        backing_path = backing_vol.path()
+        backing_format = _volume_format(backing_vol) or "qcow2"
+        capacity = _parse_size(size) if size else _safe_get_volume_info(backing_vol)[1]
+        if not capacity:
+            raise MachineError(
+                "bad_argument",
+                f"cannot tell the size of backing volume '{backing}', pass --size",
+            )
+    else:
+        if not size:
+            raise MachineError("bad_argument", "vol_create needs --size <size>")
+        capacity = _parse_size(size)
+
+    xml = (
+        f"<volume><name>{escape(name)}</name>"
+        f"<capacity unit='bytes'>{capacity}</capacity>"
+        f"<target><format type='{escape(volume_format)}'/></target>"
+    )
+    if backing_path:
+        xml += (
+            f"<backingStore><path>{escape(backing_path)}</path>"
+            f"<format type='{escape(backing_format)}'/></backingStore>"
+        )
+    xml += "</volume>"
+
+    try:
+        vol = pool.createXML(xml, 0)
+    except libvirt.libvirtError as exc:
+        raise MachineError(
+            "vol_create_failed", f"cannot create volume '{name}' in '{pool_name}': {exc}"
+        ) from exc
+    if vol is None:
+        raise MachineError("vol_create_failed", f"cannot create volume '{name}' in '{pool_name}'")
+    return _volume_document(vol)
+
+
+def cmd_vol_upload(conn: libvirt.virConnect, args: list[str]) -> dict[str, Any]:
+    """Copy a file of this machine into a volume that exists on the hypervisor."""
+    if len(args) < 3:
+        raise MachineError(
+            "bad_argument",
+            "vol_upload needs <pool> <volume> <local-path> [--offset <size>]",
+        )
+    pool_name, volume_name, local_path, args = args[0], args[1], args[2], args[3:]
+    offset_option = _take_option(args, "offset")
+    offset = _parse_size(offset_option, "offset") if offset_option else 0
+    _reject_leftover(args, "vol_upload")
+    if not os.path.exists(local_path):
+        raise MachineError("no_file", f"no such file: {local_path}")
+
+    vol = _volume_by_name(_pool_by_name(conn, pool_name), volume_name)
+    size = os.path.getsize(local_path)
+    stream = conn.newStream(0)
+    try:
+        vol.upload(stream, offset, size)
+        with open(local_path, "rb") as handle:
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                stream.send(chunk)
+        stream.finish()
+    except libvirt.libvirtError as exc:
+        # finish() releases the stream; a failed transfer is abandoned instead.
+        try:
+            stream.abort()
+        except libvirt.libvirtError:
+            pass
+        raise MachineError(
+            "upload_failed",
+            f"cannot upload '{local_path}' to '{pool_name}/{volume_name}': {exc}",
+        ) from exc
+    document = _volume_document(vol)
+    document["bytes"] = size
+    return document
+
+
+def cmd_vol_delete(conn: libvirt.virConnect, args: list[str]) -> dict[str, Any]:
+    """Delete a volume. libvirt refuses while a running domain holds it open."""
+    if len(args) < 2:
+        raise MachineError("bad_argument", "vol_delete needs <pool> <volume> [--snapshots]")
+    pool_name, volume_name, args = args[0], args[1], args[2:]
+    with_snapshots = _take_flag(args, "snapshots")
+    _reject_leftover(args, "vol_delete")
+    vol = _volume_by_name(_pool_by_name(conn, pool_name), volume_name)
+    flags = (
+        libvirt.VIR_STORAGE_VOL_DELETE_WITH_SNAPSHOTS
+        if with_snapshots
+        else libvirt.VIR_STORAGE_VOL_DELETE_NORMAL
+    )
+    try:
+        vol.delete(flags)
+    except libvirt.libvirtError as exc:
+        raise MachineError(
+            "vol_delete_failed",
+            f"cannot delete volume '{volume_name}' from '{pool_name}': {exc}",
+        ) from exc
+    return {"deleted": True, "pool": pool_name, "name": volume_name}
+
+
 _COMMANDS: dict[str, Callable[[libvirt.virConnect, list[str]], Any]] = {
     "capabilities": cmd_capabilities,
     "host_info": cmd_host_info,
@@ -364,6 +653,11 @@ _COMMANDS: dict[str, Callable[[libvirt.virConnect, list[str]], Any]] = {
     "dominfo": cmd_dominfo,
     "pool_info": cmd_pool_info,
     "net_info": cmd_net_info,
+    "pool_ensure": cmd_pool_ensure,
+    "vol_info": cmd_vol_info,
+    "vol_create": cmd_vol_create,
+    "vol_upload": cmd_vol_upload,
+    "vol_delete": cmd_vol_delete,
 }
 
 

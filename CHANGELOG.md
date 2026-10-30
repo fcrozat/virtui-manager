@@ -4,6 +4,19 @@ All notable changes to Virtui Manager are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- Machine-readable CLI mode: `vmc --json --server <name> -c "<command>"` prints exactly one JSON
+  document on stdout, reports failures as `{"error": {"code", "message"}}`, and is documented in
+  the CLI manual. Read-only commands (`capabilities`, `host_info`, `list`, `dominfo`, `pool_info`,
+  `net_info`) landed with 4a8e2f2.
+- Storage commands in machine mode: `pool_ensure`, `vol_info`, `vol_create` (empty or as a qcow2
+  overlay of an existing volume), `vol_upload` and `vol_delete`.
+
+### Changed
+- `vmc -c "<command>"` exits with the command's status instead of always 0.
+
 ## [3.3.9]
 
 ### Changed
