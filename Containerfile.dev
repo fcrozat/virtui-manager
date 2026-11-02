@@ -1,0 +1,57 @@
+# Developer image for working on virtui-manager outside the host.
+#
+# The host has neither libvirt-devel nor python3's libvirt bindings, so
+# nothing in this repository can be imported, let alone tested, there.
+# Not part of the package: keep this file untracked, upstream does not
+# want it. Build and run:
+#
+#   podman build -t vmc-dev -f Containerfile.dev .
+#   podman run --rm -v "$PWD:/work:ro,z" vmc-dev \
+#     python3 -m pytest tests -o addopts= -p no:cacheprovider -q
+#
+# There is a libvirt daemon in the image for real end-to-end runs. Nothing
+# starts it (no systemd), and KVM needs the host's /dev/kvm:
+#
+#   podman run --rm --privileged --device /dev/kvm -v "$PWD:/work:z" vmc-dev \
+#     bash -c 'libvirtd -d; vmc --json -c capabilities'
+#
+# Tumbleweed ships libvirt 12.8.0 and python313-libvirt-python 12.8.0, so
+# the bindings match the C library. Upstream CI pins libvirt-python 10.0.0
+# against libvirt 10.0.0 on Ubuntu; a difference here is worth knowing about.
+FROM registry.opensuse.org/opensuse/tumbleweed:latest
+
+# shortcut: the packages Textual and friends that Tumbleweed does not carry
+# come from PyPI; if the image ever needs to build offline, vendor them.
+RUN zypper --non-interactive refresh && \
+    zypper --non-interactive in --no-recommends \
+        python313 python313-devel python313-pip \
+        python313-libvirt-python python313-pytest python313-pytest-cov \
+        libvirt-client libvirt-devel gcc \
+        python313-gobject typelib-1_0-Libosinfo-1_0 libosinfo \
+        libvirt-daemon libvirt-daemon-qemu libvirt-daemon-config-network \
+        git tar which gzip && \
+    zypper --non-interactive clean -a && \
+    rm -rf /var/cache/zypp/*
+
+# textual is not in openSUSE-Tumbleweed-Oss; the CLI imports it through
+# modals.input_modals even though it is a cmd.Cmd shell. Tumbleweed's python
+# is externally managed (PEP 668), so these go in a venv that still sees the
+# system libvirt bindings.
+RUN python3.13 -m venv --system-site-packages /venv && \
+    /venv/bin/pip install --no-input textual PyYAML markdown-it-py netifaces
+ENV PATH="/venv/bin:$PATH"
+
+# Run the checkout in place: `vmc` resolves vmanager from /work/src, so an
+# edit on the host is the next thing the container runs. sys.argv[0] is set
+# because python3 -c leaves "-c" there and argparse would show it in usage.
+ENV PYTHONPATH=/work/src
+RUN printf '#!/bin/sh\nexec python3 -c '"'"'import sys; sys.argv[0] = "vmc"; from vmanager.wrapper import cmd_main; cmd_main()'"'"' "$@"\n' > /usr/local/bin/vmc && \
+    chmod +x /usr/local/bin/vmc
+
+WORKDIR /work
+
+# Fail the build rather than the first test run if an import is missing.
+RUN python3.13 -c "import libvirt, yaml, textual, markdown_it, netifaces" && \
+    python3.13 -c "import libvirt; print('libvirt-python ok')" && virsh --version
+
+CMD ["/bin/bash"]
