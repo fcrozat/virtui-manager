@@ -461,6 +461,11 @@ Options come after the positional arguments, written `--name value`.
 | `installvm --resolve [same options]` | the plan such an install would follow, and the keys still unanswered — nothing is created |
 | `installvm ... --wait [--timeout <s>]` | hold the command until the guest reports an address; `ipv4: null` is still a success, a domain that stops existing is `wait_failed` |
 
+Secure Boot is reported but not enrolled: `capabilities` marks the firmwares that are
+secure-boot capable, and `vol_upload` can deliver an EFI vars file as a volume of its own,
+but no command writes EFI variables into a volume — enrolling a key or adding a database
+entry has to happen outside `vmc`, on the hypervisor, with `efivars` or `virt-fw-vars`.
+
 Sizes are written `4096`, `512M`, `20G`, `1T` (spaces and a trailing `B` are allowed).
 Volume paths are those of the **hypervisor**, not of the machine running `vmc`, which is
 why sending a base image over is `vol_create` at the right size and then `vol_upload`.

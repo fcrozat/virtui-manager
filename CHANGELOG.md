@@ -33,6 +33,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the others, whose machine names do not carry over. An architecture whose query fails is
   skipped rather than losing every firmware.
 
+### Known limitations
+- Machine mode reports which firmwares are Secure Boot capable (`capabilities` marks them) and can
+  upload an EFI vars file as a volume, but no command writes EFI variables into a volume: enrolling
+  a key or adding a db entry still has to be done on the hypervisor. A caller that needs a signed
+  boot of its own key therefore has to plant the vars file itself.
+
 ### Changed
 - `vmc -c "<command>"` exits with the command's status instead of always 0.
 
