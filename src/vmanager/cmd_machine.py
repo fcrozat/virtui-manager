@@ -19,18 +19,21 @@ import os
 import re
 import shlex
 import sys
+import time
 import xml.etree.ElementTree as ET
 from typing import Any, Callable
 from xml.sax.saxutils import escape
 
 import libvirt
 
+from . import install_plan
 from .config import load_config
 from .firmware_manager import get_uefi_files
 from .libvirt_utils import get_host_architecture, get_network_info
 from .storage_manager import _safe_get_volume_info, create_storage_pool
-from .utils import sanitize_sensitive_data
+from .utils import _sanitize_domain_name, sanitize_sensitive_data
 from .vm_actions import force_off_vm, start_vm, stop_vm
+from .vm_provisioner import VMProvisioner
 
 # Machine API level. A caller that needs a command added after this level
 # checks it here rather than parsing a version string.
@@ -765,7 +768,190 @@ def cmd_undefine(conn: libvirt.virConnect, args: list[str]) -> dict[str, Any]:
     return {"undefined": True, "name": name}
 
 
+#: How long `installvm --wait` looks for a guest address before it stops. An installer
+#: takes minutes, so this is what a caller waits rather than a deadline the install has
+#: to meet: no address by then is reported as no address, not as a failed install.
+DEFAULT_INSTALL_TIMEOUT = 600
+
+
+def _positive_int(raw: str) -> int:
+    """A count answered on the command line, which has to be at least one.
+
+    A flag asked for with no count in it is a mistake in the command, so it is reported
+    as one here rather than reaching the plan, where a value that settles nothing comes
+    back as a question.
+    """
+    number = int(raw)  # a value that is not a number is reported by the caller
+    if number < 1:
+        raise ValueError(f"'{raw}' is not a positive number")
+    return number
+
+
+def _positive_bytes(raw: str) -> int:
+    """A size answered on the command line, in bytes, which has to be at least one."""
+    return _positive_int(str(_parse_size(raw)))
+
+
+#: The flags `installvm` answers a plan with, as (flag, plan key, what to make of it).
+#: `--dist` and `--cpus` are the words a human and a distribution catalog use for the
+#: keys named `os` and `vcpu`; on a command line both names give the same answer.
+_INSTALL_ANSWER_FLAGS = (
+    ("iso", "iso", str),
+    ("os", "os", str),
+    ("dist", "os", str),
+    ("pool", "pool", str),
+    ("network", "network", str),
+    ("memory", "memory_mb", _positive_int),
+    ("cpus", "vcpu", _positive_int),
+    ("disk", "disk_size_bytes", _positive_bytes),
+)
+
+
+def _install_name(name: str | None) -> str:
+    """The name an install is asked for, in the form libvirt and `vmc list` use.
+
+    The rule the New VM wizard applies to a name typed into it (see
+    `utils._sanitize_domain_name`); a name arriving on a command line has had no other
+    chance to be cleaned up, and a domain named with a character libvirt refuses cannot
+    be found again by the caller that asked for it.
+    """
+    if not name:
+        raise MachineError("bad_argument", "installvm needs the name of the domain to install")
+    try:
+        cleaned, _changed = _sanitize_domain_name(name)
+    except ValueError as exc:
+        raise MachineError("bad_argument", f"name: {exc}") from exc
+    if not cleaned:
+        raise MachineError("bad_argument", f"'{name}' has no characters a domain name can hold")
+    return cleaned
+
+
+def _read_answers(path: str) -> Any:
+    """The document `--answer` names; `install_plan.apply_answers` is what reads it."""
+    if not os.path.exists(path):
+        raise MachineError("no_file", f"no answer file '{path}'")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, json.JSONDecodeError) as exc:
+        raise MachineError("bad_answer", f"answer file '{path}': {exc}") from exc
+
+
+def _timeout_seconds(value: str) -> int:
+    """A `--timeout` as whole seconds."""
+    try:
+        seconds = int(value)
+    except ValueError:
+        raise MachineError(
+            "bad_argument", f"--timeout: '{value}' is not a number of seconds"
+        ) from None
+    if seconds < 1:
+        raise MachineError(
+            "bad_argument", f"--timeout: '{value}' is not a positive number of seconds"
+        )
+    return seconds
+
+
+def cmd_installvm(conn: libvirt.virConnect, args: list[str]) -> dict[str, Any]:
+    """Install a domain from an ISO, or say what that install would do.
+
+    An install decides a name, an ISO, an OS, a pool, a disk and a network before it can
+    start, and every one of those decisions is worked out into a plan first (see
+    `install_plan`), by the same code the New VM wizard runs. `--resolve` answers with
+    that plan and changes nothing. Without it the plan has to be closed: a decision still
+    open is a `needs_answer` error naming it, because a machine reading this output has no
+    way to be asked a question halfway through an install, and a plan the caller answered
+    is the only way to say what it wanted.
+    """
+    answers_path = _take_option(args, "answer")
+    timeout = _take_option(args, "timeout")
+    resolve = _take_flag(args, "resolve")
+    wait = _take_flag(args, "wait")
+
+    answers: dict[str, Any] = {}
+    for flag, key, cast in _INSTALL_ANSWER_FLAGS:
+        raw = _take_option(args, flag)
+        if raw is None:
+            continue
+        try:
+            answers[key] = cast(raw)
+        except ValueError as exc:
+            raise MachineError("bad_argument", f"--{flag}: {exc}") from exc
+
+    name = _take_option(args, "name")
+    if name is None and args and not args[0].startswith("-"):
+        name = args.pop(0)
+    _reject_leftover(args, "installvm")
+    name = _install_name(name)
+    limit = _timeout_seconds(timeout) if timeout is not None else DEFAULT_INSTALL_TIMEOUT
+
+    if answers_path is not None:
+        try:
+            answers = {**install_plan.apply_answers(_read_answers(answers_path)), **answers}
+        except install_plan.NeedsAnswer as exc:
+            raise MachineError("bad_answer", f"--answer: {exc}") from exc
+
+    provisioner = VMProvisioner(conn)
+    plan = install_plan.build_plan(provisioner, name, _host_capabilities(conn), answers)
+    if resolve:
+        return {"plan": plan}
+    if plan["unresolved"]:
+        open_decisions = "; ".join(
+            f"{entry['key']}: {entry['reason']}"
+            + (f" (one of: {', '.join(entry['choices'])})" if entry["choices"] else "")
+            for entry in plan["unresolved"]
+        )
+        raise MachineError(
+            "needs_answer", f"an install of '{name}' is not settled - {open_decisions}"
+        )
+    if plan["exists"]:
+        raise MachineError("domain_exists", f"a domain named '{name}' is already defined")
+    if plan["tools_missing"]:
+        # Named here rather than left to the install: without these the installer never
+        # starts, and `install_failed` saying which tool is missing beats a timeout.
+        raise MachineError(
+            "install_failed",
+            f"an install of {plan['os']} needs {', '.join(plan['tools_missing'])} on the hypervisor",
+        )
+
+    domain = install_plan.provision_from_plan(provisioner, plan, name)
+    if not domain:
+        raise MachineError(
+            "install_failed",
+            f"could not install '{name}'; the hypervisor's virt-manager log says why",
+        )
+    result: dict[str, Any] = {
+        "name": domain.name(),
+        "uuid": domain.UUIDString(),
+        "ipv4": None,
+        "state": _domain_state(domain),
+    }
+    if wait:
+        result["ipv4"] = _wait_for_address(domain, limit)
+    return result
+
+
+def _wait_for_address(domain: libvirt.virDomain, limit: int) -> str | None:
+    """The guest's address, waiting up to `limit` seconds for the install to report one.
+
+    An address is the only sign from outside that something is running inside the guest:
+    libvirt says a domain is running, not that anything booted in it. So no address by the
+    deadline is reported as `null`, which is still a success: the install happened, and
+    the caller that wants the lease can look it up itself or ask again with `dominfo`.
+    """
+    deadline = time.monotonic() + limit
+    while True:
+        try:
+            address = _address(domain, [])
+        except libvirt.libvirtError:
+            return None  # the domain is gone, so nothing will report an address
+        if address or time.monotonic() >= deadline:
+            return address
+        time.sleep(2)
+
+
 _COMMANDS: dict[str, Callable[[libvirt.virConnect, list[str]], Any]] = {
+    "installvm": cmd_installvm,
     "define": cmd_define,
     "start": cmd_start,
     "shutdown": cmd_shutdown,

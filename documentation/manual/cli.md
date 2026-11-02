@@ -425,6 +425,9 @@ document; `2` the command line was wrong.
 | `no_domain` / `no_pool` / `no_volume` / `no_network` / `no_file` | what was named does not exist |
 | `pool_path_conflict` | `pool_ensure --path` disagrees with the pool that already exists |
 | `pool_ensure_failed` / `vol_create_failed` / `vol_delete_failed` / `upload_failed` | libvirt refused the operation |
+| `needs_answer` | `installvm` is missing an answer — the message names the key, and `--resolve` lists every key still needed |
+| `bad_answer` | an `--answer` is not a plan key, or the file is neither a plan nor a map of answers |
+| `install_failed` | the install could not be started or did not finish — the message says what was missing or what `virt-install` reported |
 | `define_failed` / `start_failed` / `shutdown_failed` / `destroy_failed` / `undefine_failed` | libvirt refused that power or definition operation |
 | `capabilities_failed` / `host_info_failed` | the hypervisor would not describe itself |
 | `libvirt_error` | any other libvirt failure |
@@ -452,6 +455,9 @@ Options come after the positional arguments, written `--name value`.
 | `shutdown <domain>` | the ACPI power button — answers at once, read `dominfo` for the state |
 | `destroy <domain>` | power off without asking the guest |
 | `undefine <domain> [--nvram] [--snapshots] [--save]` | `undefined: true`; refused while the domain is running |
+| `installvm <name> [--iso <image>] [--os <distribution>] [--answer key=value\|--answer <file>] [--pool <pool>] [--network <net>] [--memory <MB>] [--cpus <n>] [--disk <size>]` | build a new VM from an image |
+| `installvm --resolve [same options]` | the plan such an install would follow, and the keys still unanswered — nothing is created |
+| `installvm ... --wait [--timeout <s>] [--ip <address>]` | hold the command until the guest has an address; `ipv4: null` is still a success |
 
 Sizes are written `4096`, `512M`, `20G`, `1T` (spaces and a trailing `B` are allowed).
 Volume paths are those of the **hypervisor**, not of the machine running `vmc`, which is
@@ -479,6 +485,32 @@ vmc --json --server ryzen9 -c "shutdown web-01"
 vmc --json --server ryzen9 -c "undefine web-01 --nvram"
 ```
 
+### Example: an install a script cannot answer for
+
+An install needs more than a name: which image, which distribution it is, where the disk
+goes. `--resolve` answers what a host already knows and lists what it does not, so a
+script can ask a person, or its own configuration, for exactly those:
+
+```bash
+vmc --json --server ryzen9 -c "installvm --resolve web-01" > plan.json
+# "unresolved": ["iso"] means nothing was created and `iso` has to be answered.
+vmc --json --server ryzen9 -c "installvm web-01 --iso SLE-15-SP7-x86_64.iso"
+# Or fill in that plan and send the whole thing back:
+vmc --json --server ryzen9 -c "installvm web-01 --answer plan.json --wait"
+```
+
+`--iso` names a cached image, a file on the **hypervisor**, or an HTTP(S) URL. `--os` is
+the distribution, spelled as the `os` question lists its choices (`OPENSUSE`, `UBUNTU`,
+`WINDOWS`, …) — needed for an image this cannot place by filename. A file is read on the
+machine running `vmc`, and holds plan keys, so `--answer` can also override single values
+— `--answer memory_mb=2048 --answer automation=/srv/web-01.yaml` — where `automation` is
+the answer file the installer is served, which is what makes an install unattended.
+
+An install runs while the command does. `--wait` holds it until the guest has asked the
+network for an address and reports it as `ipv4`; no address by `--timeout` is still exit 0
+with `ipv4: null`, because libvirt can say a domain is running but not that anything
+booted inside it. Use `dominfo` afterwards to look again.
+
 ## Command Reference Summary
 
 | Category | Commands |
@@ -490,6 +522,6 @@ vmc --json --server ryzen9 -c "undefine web-01 --nvram"
 | Backups | `backup_create`, `backup_list`, `backup_status`, `backup_restore`, `backup_cleanup` |
 | Networking | `list_networks`, `net_start`, `net_stop`, `net_delete`, `net_info`, `net_autostart` |
 | Storage | `list_pool`, `list_unused_volumes` |
-| Machine mode (`--json`) | `capabilities`, `host_info`, `list`, `dominfo`, `pool_info`, `net_info`, `pool_ensure`, `vol_info`, `vol_create`, `vol_upload`, `vol_delete`, `define`, `start`, `shutdown`, `destroy`, `undefine` |
+| Machine mode (`--json`) | `capabilities`, `host_info`, `list`, `dominfo`, `pool_info`, `net_info`, `pool_ensure`, `vol_info`, `vol_create`, `vol_upload`, `vol_delete`, `installvm`, `define`, `start`, `shutdown`, `destroy`, `undefine` |
 | Pipelines | `pipeline` (with `|` chaining) |
 | Shell/Utils | `bash`, `history`, `!<number>`, `quit`, `help` |

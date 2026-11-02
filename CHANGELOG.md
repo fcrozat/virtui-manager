@@ -16,6 +16,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Domain lifecycle in machine mode: `define` (XML from a file or stdin), `start`, `shutdown`,
   `destroy` and `undefine` (`--nvram`, `--snapshots`, `--save`). `start` and `shutdown` are
   idempotent, and `shutdown` answers before the guest is down, as an ACPI request does.
+- Install in machine mode: `installvm <name>` builds a domain from an install image. Since an
+  install decides a name, an image, a distribution, a pool, a disk and a network before it can
+  start, `installvm --resolve` prints that plan and the keys it could not answer, and the caller
+  answers exactly those — with the flags `--iso`, `--os`, `--pool`, `--network`, `--memory`,
+  `--cpus`, `--disk`, or with a plan file through `--answer`. `--wait` holds the command until
+  the guest has asked the network for an address, which it reports as `ipv4`.
 
 ### Fixed
 - Firmware discovery asked the hypervisor for x86_64 domain capabilities only, so the
