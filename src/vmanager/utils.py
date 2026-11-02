@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Callable, List, Optional, Tuple, Union
 from urllib.parse import urlparse
 
-from .constants import AppInfo
+from .constants import AppInfo, ErrorMessages
 
 # Regex to match URIs with embedded credentials (user:password@host pattern)
 # Matches patterns like: qemu+ssh://user:password@host/system
@@ -1128,3 +1128,30 @@ def setup_logging():
         logging.info("--- Logging initialized ---")
 
     setup_cache_monitoring(enable=False)
+
+
+def _sanitize_domain_name(input_string: str) -> tuple[str, bool]:
+    """
+    Sanitise domain name input to alphanumeric, hyphen, and period only.
+    Returns a tuple: (sanitized_string, was_modified).
+    `was_modified` is True if any characters were removed/changed or input was empty.
+
+    Lives here rather than in a modal because a name typed at a terminal has to pass
+    through the same rule as one typed in the UI.
+    """
+    original_stripped = input_string.strip()
+    was_modified = False
+
+    if not original_stripped:
+        return "", True  # Empty input is considered modified
+
+    # Allow alphanumeric, hyphens, and periods
+    sanitized = re.sub(r"[^a-zA-Z0-9.-]", "", original_stripped)
+
+    if len(sanitized) > 64:  # Common domain name length limit
+        raise ValueError(ErrorMessages.SANITIZED_DOMAIN_TOO_LONG)
+
+    if sanitized != original_stripped:
+        was_modified = True
+
+    return sanitized, was_modified
