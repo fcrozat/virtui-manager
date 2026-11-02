@@ -18,6 +18,7 @@ from unittest.mock import MagicMock, patch
 # Add the src directory to the path to import vmanager modules
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
+import libvirt  # noqa: E402
 from test_cmd_machine import make_connection, make_domain, run_command  # noqa: E402
 
 from vmanager import cmd_machine, install_plan  # noqa: E402
@@ -263,6 +264,18 @@ class TestWaiting(InstallTestCase):
         self.assertEqual(0, code, document)
         self.assertIsNone(document["ipv4"])
         sleep.assert_not_called()
+
+    def test_a_domain_that_stops_existing_while_waiting_is_not_a_finished_install(self):
+        domain = make_domain("install-me")
+        gone = libvirt.libvirtError("Domain 42 not found")
+        gone.get_error_code = lambda: libvirt.VIR_ERR_NO_DOMAIN
+        domain.ID.side_effect = gone
+        self.provisioner.provision_vm.return_value = domain
+
+        code, document = self.run_install("install-me --wait --timeout 1")
+
+        self.assertEqual(1, code)
+        self.assertEqual("wait_failed", document["error"]["code"])
 
     def test_a_timeout_that_is_not_seconds_is_refused(self):
         code, document = self.run_install("install-me --wait --timeout soon")

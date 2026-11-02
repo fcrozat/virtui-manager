@@ -21,7 +21,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   start, `installvm --resolve` prints that plan and the keys it could not answer, and the caller
   answers exactly those — with the flags `--iso`, `--os`, `--pool`, `--network`, `--memory`,
   `--cpus`, `--disk`, or with a plan file through `--answer`. `--wait` holds the command until
-  the guest has asked the network for an address, which it reports as `ipv4`.
+  the guest has asked the network for an address, which it reports as `ipv4`; a domain that
+  stops existing during that wait is the error `wait_failed`, not a finished install.
 
 ### Fixed
 - Firmware discovery asked the hypervisor for x86_64 domain capabilities only, so the

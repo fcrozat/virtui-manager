@@ -931,6 +931,17 @@ def cmd_installvm(conn: libvirt.virConnect, args: list[str]) -> dict[str, Any]:
     return result
 
 
+def _still_defined(domain: libvirt.virDomain) -> bool:
+    """Whether the domain is still there; once undefined, libvirt refuses the object itself."""
+    try:
+        domain.ID()
+        return True
+    except libvirt.libvirtError as exc:
+        if exc.get_error_code() == libvirt.VIR_ERR_NO_DOMAIN:
+            return False
+        raise
+
+
 def _wait_for_address(domain: libvirt.virDomain, limit: int) -> str | None:
     """The guest's address, waiting up to `limit` seconds for the install to report one.
 
@@ -938,13 +949,16 @@ def _wait_for_address(domain: libvirt.virDomain, limit: int) -> str | None:
     libvirt says a domain is running, not that anything booted in it. So no address by the
     deadline is reported as `null`, which is still a success: the install happened, and
     the caller that wants the lease can look it up itself or ask again with `dominfo`.
+    A domain that stops existing halfway is not a success but a `wait_failed`: nothing
+    was installed that the caller could use, and reporting `null` would say otherwise.
     """
     deadline = time.monotonic() + limit
     while True:
-        try:
-            address = _address(domain, [])
-        except libvirt.libvirtError:
-            return None  # the domain is gone, so nothing will report an address
+        if not _still_defined(domain):
+            raise MachineError(
+                "wait_failed", f"'{domain.name()}' stopped existing while waiting for its address"
+            )
+        address = _address(domain, [])  # swallows a hypervisor that will not answer this time
         if address or time.monotonic() >= deadline:
             return address
         time.sleep(2)

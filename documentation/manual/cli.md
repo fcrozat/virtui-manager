@@ -427,6 +427,8 @@ document; `2` the command line was wrong.
 | `pool_ensure_failed` / `vol_create_failed` / `vol_delete_failed` / `upload_failed` | libvirt refused the operation |
 | `needs_answer` | `installvm` is missing an answer — the message names the key, and `--resolve` lists every key still needed |
 | `bad_answer` | an `--answer` is not a plan key, or the file is neither a plan nor a map of answers |
+| `domain_exists` | `installvm` was given a name the hypervisor already has defined |
+| `wait_failed` | `installvm --wait` lost the domain before it reported an address |
 | `install_failed` | the install could not be started or did not finish — the message says what was missing or what `virt-install` reported |
 | `define_failed` / `start_failed` / `shutdown_failed` / `destroy_failed` / `undefine_failed` | libvirt refused that power or definition operation |
 | `capabilities_failed` / `host_info_failed` | the hypervisor would not describe itself |
@@ -457,7 +459,7 @@ Options come after the positional arguments, written `--name value`.
 | `undefine <domain> [--nvram] [--snapshots] [--save]` | `undefined: true`; refused while the domain is running |
 | `installvm <name> [--iso <image>] [--os <distribution>] [--answer key=value\|--answer <file>] [--pool <pool>] [--network <net>] [--memory <MB>] [--cpus <n>] [--disk <size>]` | build a new VM from an image |
 | `installvm --resolve [same options]` | the plan such an install would follow, and the keys still unanswered — nothing is created |
-| `installvm ... --wait [--timeout <s>] [--ip <address>]` | hold the command until the guest has an address; `ipv4: null` is still a success |
+| `installvm ... --wait [--timeout <s>]` | hold the command until the guest reports an address; `ipv4: null` is still a success, a domain that stops existing is `wait_failed` |
 
 Sizes are written `4096`, `512M`, `20G`, `1T` (spaces and a trailing `B` are allowed).
 Volume paths are those of the **hypervisor**, not of the machine running `vmc`, which is
