@@ -390,7 +390,11 @@ def get_host_architecture(conn: libvirt.virConnect) -> str:
 
 @lru_cache(maxsize=4)
 def get_domain_capabilities_xml(
-    conn: libvirt.virConnect, emulatorbin: str, arch: str, machine: str, flags: int = 0
+    conn: libvirt.virConnect,
+    emulatorbin: str,
+    arch: str,
+    machine: Optional[str],
+    flags: int = 0,
 ) -> Optional[str]:
     """Retrieves the domain capabilities XML for a specific guest configuration.
 
@@ -398,7 +402,8 @@ def get_domain_capabilities_xml(
         conn: The libvirt connection object
         emulatorbin: The emulator binary path
         arch: The architecture
-        machine: The machine type
+        machine: The machine type, or None to let libvirt use its default
+                 machine for that architecture
         flags: The flags to use
 
     Returns:

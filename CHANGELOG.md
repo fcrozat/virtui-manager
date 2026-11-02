@@ -17,6 +17,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `destroy` and `undefine` (`--nvram`, `--snapshots`, `--save`). `start` and `shutdown` are
   idempotent, and `shutdown` answers before the guest is down, as an ACPI request does.
 
+### Fixed
+- Firmware discovery asked the hypervisor for x86_64 domain capabilities only, so the
+  firmware of any other architecture — AAVMF for aarch64, for one — was never listed and
+  could not be selected. It now queries every architecture the hypervisor reports and
+  merges the loaders by path, so a loader served for several architectures is listed once with
+  them all. The machine type is passed only for x86_64 (`pc`, as before) and left to libvirt for
+  the others, whose machine names do not carry over. An architecture whose query fails is
+  skipped rather than losing every firmware.
+
 ### Changed
 - `vmc -c "<command>"` exits with the command's status instead of always 0.
 

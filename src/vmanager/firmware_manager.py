@@ -1,6 +1,7 @@
 """
 Module for managing firmware-related information and operations.
 """
+
 from __future__ import annotations
 
 import fnmatch
@@ -15,6 +16,13 @@ from .libvirt_utils import get_domain_capabilities_xml, get_host_domain_capabili
 from .utils import log_function_call
 
 FIRMWARE_META_BASE_DIR = "/usr/share/qemu/firmware/"
+
+# Machine type requested when asking for domain capabilities, per architecture.
+# x86_64 keeps the "pc" alias this module has always used (the list of loaders
+# depends on the machine type). For every other architecture there is no
+# portable machine name, so None is passed and libvirt uses its own default for
+# that architecture.
+CAPS_MACHINE_BY_ARCH = {"x86_64": "pc"}
 
 # Cache for firmware list to avoid repeated calls
 _firmware_cache = {}
@@ -109,6 +117,8 @@ def get_uefi_files(conn: libvirt.virConnect | None = None, use_cache: bool = Tru
 
     When a connection is provided, retrieves firmware from the remote/local hypervisor
     using libvirt's domain capabilities and reads firmware JSON metadata files.
+    Every architecture the hypervisor reports in its capabilities is queried, so an
+    x86_64 hypervisor that also serves aarch64 returns AAVMF loaders as well.
     Falls back to local filesystem access if connection is None.
 
     Args:
@@ -131,30 +141,39 @@ def get_uefi_files(conn: libvirt.virConnect | None = None, use_cache: bool = Tru
     if conn:
         # Use libvirt to retrieve firmware info from the host
         try:
-            # Try to get domain capabilities for x86_64 first (most common)
-            # This works for both local and remote systems
-            caps_xml = get_domain_capabilities_xml(
-                conn=conn, emulatorbin=None, arch="x86_64", machine="pc", flags=0
-            )
+            # Firmwares belong to an architecture, so ask the hypervisor which
+            # ones it hosts and query the domain capabilities of each: a single
+            # x86_64 query never reports an AAVMF loader, for instance.
+            architectures = _get_supported_architectures(conn)
+            if not architectures:
+                # Nothing reported: keep the single-architecture behaviour.
+                architectures = ["x86_64"]
 
-            if not caps_xml:
-                logging.warning("Could not get domain capabilities from libvirt")
-                # Fall back to local filesystem if no capabilities available
-                _load_firmware_from_files(uefi_files)
-                _firmware_cache[cache_key] = uefi_files
-                return uefi_files
+            # Loader path -> Firmware, merged over the architectures: the same
+            # file reported for two of them gets both in .architectures.
+            firmwares_by_loader = {}
+            for arch in architectures:
+                caps_xml = get_domain_capabilities_xml(
+                    conn=conn,
+                    emulatorbin=None,
+                    arch=arch,
+                    machine=CAPS_MACHINE_BY_ARCH.get(arch),
+                    flags=0,
+                )
 
-            root = ET.fromstring(caps_xml)
+                if not caps_xml:
+                    logging.warning("Could not get domain capabilities from libvirt for %s", arch)
+                    continue
 
-            # Extract loader values from domain capabilities
-            loader_values = []
-            loader_elem = root.find(".//os/loader")
-            if loader_elem is not None:
-                for value_elem in loader_elem.findall("value"):
-                    if value_elem.text:
-                        loader_values.append(value_elem.text.strip())
+                for loader_path in _get_loader_values(caps_xml):
+                    firmware = firmwares_by_loader.get(loader_path)
+                    if firmware is None:
+                        firmware = _firmware_from_loader(loader_path)
+                        firmwares_by_loader[loader_path] = firmware
+                    if arch not in firmware.architectures:
+                        firmware.architectures.append(arch)
 
-            if not loader_values:
+            if not firmwares_by_loader:
                 logging.warning("No loader values found in domain capabilities")
                 # Fall back to local filesystem if no loaders found
                 _load_firmware_from_files(uefi_files)
@@ -173,50 +192,10 @@ def get_uefi_files(conn: libvirt.virConnect | None = None, use_cache: bool = Tru
             except OSError as e:
                 logging.warning("Could not read firmware JSON files: %s", e)
 
-            # Fallback: create Firmware objects from loader values alone
+            # Fallback: use the Firmware objects built from loader values alone
             # This provides basic firmware info even if metadata is unavailable
             logging.info("Using fallback firmware creation from loader values")
-            for loader_path in loader_values:
-                firmware = Firmware()
-                firmware.executable = loader_path
-
-                # Infer NVRAM template path from loader path
-                # Try common patterns like substituting "code" with "vars"
-                nvram_guess = None
-                if "code" in loader_path:
-                    nvram_guess = loader_path.replace("code", "vars")
-                elif "CODE" in loader_path:
-                    nvram_guess = loader_path.replace("CODE", "VARS")
-                elif "Code" in loader_path:
-                    nvram_guess = loader_path.replace("Code", "Vars")
-
-                # We can't verify existence easily on remote host, but we can assign it
-                # if the pattern matched.
-                if nvram_guess and nvram_guess != loader_path:
-                    firmware.nvram_template = nvram_guess
-
-                # Infer architecture from path (default to x86_64)
-                if "aarch64" in loader_path.lower() or "arm64" in loader_path.lower():
-                    firmware.architectures = ["aarch64"]
-                else:
-                    firmware.architectures = ["x86_64"]
-
-                # Infer interface type from path
-                if "bios" in loader_path.lower():
-                    firmware.interfaces = ["bios"]
-                else:
-                    firmware.interfaces = ["uefi"]
-
-                # Try to infer features from the path
-                if "secboot" in loader_path.lower() or "secure" in loader_path.lower():
-                    firmware.features = ["secure-boot"]
-                if "sev" in loader_path.lower():
-                    if "sev-es" in loader_path.lower() or "snp" in loader_path.lower():
-                        firmware.features.append("amd-sev-es")
-                    else:
-                        firmware.features.append("amd-sev")
-
-                uefi_files.append(firmware)
+            uefi_files.extend(firmwares_by_loader.values())
 
         except libvirt.libvirtError as e:
             logging.error("Error retrieving firmware via libvirt: %s", e)
@@ -229,6 +208,120 @@ def get_uefi_files(conn: libvirt.virConnect | None = None, use_cache: bool = Tru
     # Cache the result
     _firmware_cache[cache_key] = uefi_files
     return uefi_files
+
+
+def _get_supported_architectures(conn: libvirt.virConnect) -> list:
+    """
+    Lists the architectures the hypervisor says it can host.
+
+    Reads <guest><arch name='...'> from the host capabilities. The <domain>
+    children are ignored on purpose: an architecture served by plain qemu (TCG)
+    only, such as aarch64 on an x86_64 host, has firmware worth listing too.
+
+    Args:
+        conn: libvirt connection object.
+
+    Returns:
+        List of architecture names ("x86_64", "aarch64", ...), empty on failure.
+    """
+    architectures = []
+    try:
+        caps_xml = conn.getCapabilities()
+    except libvirt.libvirtError as e:
+        logging.error("Error getting host capabilities: %s", e)
+        return architectures
+
+    if not caps_xml:
+        logging.warning("Hypervisor returned no capabilities")
+        return architectures
+
+    try:
+        root = ET.fromstring(caps_xml)
+    except ET.ParseError as e:
+        logging.error("Error parsing capabilities XML: %s", e)
+        return architectures
+
+    for arch_elem in root.findall("guest/arch"):
+        name = arch_elem.get("name")
+        if name and name not in architectures:
+            architectures.append(name)
+
+    logging.debug("Hypervisor architectures: %s", architectures)
+    return architectures
+
+
+def _get_loader_values(caps_xml: str) -> list:
+    """
+    Extracts the loader paths advertised by a domain capabilities document.
+
+    Args:
+        caps_xml: The domain capabilities XML.
+
+    Returns:
+        List of loader paths, empty if the document has none.
+    """
+    try:
+        root = ET.fromstring(caps_xml)
+    except ET.ParseError as e:
+        logging.error("Error parsing domain capabilities XML: %s", e)
+        return []
+
+    loader_elem = root.find(".//os/loader")
+    if loader_elem is None:
+        return []
+
+    return [
+        value_elem.text.strip() for value_elem in loader_elem.findall("value") if value_elem.text
+    ]
+
+
+def _firmware_from_loader(loader_path: str) -> Firmware:
+    """
+    Builds a Firmware object from a loader path alone, without metadata.
+
+    The architectures are filled in by the caller, from the domain capabilities
+    that reported the loader.
+
+    Args:
+        loader_path: Path of the loader as reported by libvirt.
+
+    Returns:
+        Firmware object with the fields inferred from the path.
+    """
+    firmware = Firmware()
+    firmware.executable = loader_path
+
+    # Infer NVRAM template path from loader path
+    # Try common patterns like substituting "code" with "vars"
+    nvram_guess = None
+    if "code" in loader_path:
+        nvram_guess = loader_path.replace("code", "vars")
+    elif "CODE" in loader_path:
+        nvram_guess = loader_path.replace("CODE", "VARS")
+    elif "Code" in loader_path:
+        nvram_guess = loader_path.replace("Code", "Vars")
+
+    # We can't verify existence easily on remote host, but we can assign it
+    # if the pattern matched.
+    if nvram_guess and nvram_guess != loader_path:
+        firmware.nvram_template = nvram_guess
+
+    # Infer interface type from path
+    if "bios" in loader_path.lower():
+        firmware.interfaces = ["bios"]
+    else:
+        firmware.interfaces = ["uefi"]
+
+    # Try to infer features from the path
+    if "secboot" in loader_path.lower() or "secure" in loader_path.lower():
+        firmware.features = ["secure-boot"]
+    if "sev" in loader_path.lower():
+        if "sev-es" in loader_path.lower() or "snp" in loader_path.lower():
+            firmware.features.append("amd-sev-es")
+        else:
+            firmware.features.append("amd-sev")
+
+    return firmware
 
 
 def clear_firmware_cache(cache_key: str | None = None):
@@ -474,9 +567,9 @@ def _score_firmware(
         "acpi-s3": 2,  # Modern systems support S3
         "acpi-s4": 2,  # Modern systems support S4
         "requires-smm": 10,  # Secure boot requires SMM
-        "secure-boot": 50
-        if secure_boot_required
-        else -50,  # High value if required, strong penalty if NOT required
+        "secure-boot": (
+            50 if secure_boot_required else -50
+        ),  # High value if required, strong penalty if NOT required
         "verbose-dynamic": 5,  # Debug capability
         "amd-sev": 50,  # SEV capability (valuable but platform-specific)
         "amd-sev-es": 60,  # SEV-ES is more advanced

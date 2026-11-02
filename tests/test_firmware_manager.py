@@ -21,6 +21,47 @@ from vmanager.firmware_manager import (
     select_best_firmware,
 )
 
+# Host capabilities of an x86_64-only hypervisor: the hypervisor lists one
+# <arch> per architecture it hosts.
+HOST_CAPS_X86_64 = """<?xml version="1.0"?>
+<capabilities>
+  <guest>
+    <arch name="x86_64">
+      <domain type="kvm"/>
+    </arch>
+  </guest>
+</capabilities>
+"""
+
+# The same hypervisor with qemu-system-aarch64 installed. aarch64 is served by
+# qemu only: an x86_64 host has no kvm support for another architecture.
+HOST_CAPS_X86_64_AND_AARCH64 = """<?xml version="1.0"?>
+<capabilities>
+  <guest>
+    <arch name="x86_64">
+      <domain type="kvm"/>
+    </arch>
+  </guest>
+  <guest>
+    <arch name="aarch64">
+      <domain type="qemu"/>
+    </arch>
+  </guest>
+</capabilities>
+"""
+
+
+def domain_caps_xml(loaders):
+    """Domain capabilities XML advertising the given loader paths"""
+    values = "".join(f"<value>{path}</value>" for path in loaders)
+    return f"""<?xml version="1.0"?>
+<domainCapabilities>
+    <os>
+        <loader readonly="yes" type="pflash">{values}</loader>
+    </os>
+</domainCapabilities>
+"""
+
 
 class TestFirmware(unittest.TestCase):
     """Tests for the Firmware class"""
@@ -188,6 +229,7 @@ class TestGetUefiFiles(unittest.TestCase):
 
         # Create mock connection
         mock_conn = MagicMock()
+        mock_conn.getCapabilities.return_value = HOST_CAPS_X86_64
 
         result = get_uefi_files(mock_conn)
 
@@ -233,6 +275,7 @@ class TestGetUefiFiles(unittest.TestCase):
         mock_load_files.side_effect = populate_files
 
         mock_conn = MagicMock()
+        mock_conn.getCapabilities.return_value = HOST_CAPS_X86_64
         result = get_uefi_files(mock_conn)
 
         # Should have fallen back to filesystem
@@ -270,6 +313,7 @@ class TestGetUefiFiles(unittest.TestCase):
         ]
 
         mock_conn = MagicMock()
+        mock_conn.getCapabilities.return_value = HOST_CAPS_X86_64
 
         # The function should handle the error and still return firmware
         # created from loader values (fallback mechanism)
@@ -297,6 +341,7 @@ class TestGetUefiFiles(unittest.TestCase):
         mock_get_caps.return_value = caps_xml
 
         mock_conn = MagicMock()
+        mock_conn.getCapabilities.return_value = HOST_CAPS_X86_64
 
         # Mock _load_firmware_from_files to raise an error (simulating inaccessible JSON files)
         with patch(
@@ -339,6 +384,7 @@ class TestGetUefiFiles(unittest.TestCase):
         mock_get_caps.return_value = caps_xml
 
         mock_conn = MagicMock()
+        mock_conn.getCapabilities.return_value = HOST_CAPS_X86_64
 
         with patch(
             "vmanager.firmware_manager._load_firmware_from_files",
@@ -366,6 +412,7 @@ class TestGetUefiFiles(unittest.TestCase):
         """
         mock_get_caps.return_value = caps_xml
         mock_conn = MagicMock()
+        mock_conn.getCapabilities.return_value = HOST_CAPS_X86_64
 
         with patch(
             "vmanager.firmware_manager._load_firmware_from_files",
@@ -404,6 +451,7 @@ class TestFirmwareFeatureInference(unittest.TestCase):
         """
         mock_get_caps.return_value = caps_xml
         mock_conn = MagicMock()
+        mock_conn.getCapabilities.return_value = HOST_CAPS_X86_64
 
         with patch(
             "vmanager.firmware_manager._load_firmware_from_files", side_effect=OSError("Error")
@@ -429,6 +477,7 @@ class TestFirmwareFeatureInference(unittest.TestCase):
         """
         mock_get_caps.return_value = caps_xml
         mock_conn = MagicMock()
+        mock_conn.getCapabilities.return_value = HOST_CAPS_X86_64
 
         with patch(
             "vmanager.firmware_manager._load_firmware_from_files", side_effect=OSError("Error")
@@ -441,6 +490,174 @@ class TestFirmwareFeatureInference(unittest.TestCase):
 
         self.assertGreater(len(amd_sev), 0, "Should detect 'amd-sev' feature")
         self.assertGreater(len(amd_sev_es), 0, "Should detect 'amd-sev-es' feature")
+
+
+class TestMultiArchitectureDiscovery(unittest.TestCase):
+    """Tests for firmware discovery over every architecture of a hypervisor"""
+
+    OVMF = "/usr/share/qemu/ovmf-x86_64-4m-code.bin"
+    AAVMF = "/usr/share/qemu/aavmf-aarch64-code.bin"
+
+    def setUp(self):
+        """Clear cache before each test"""
+        clear_firmware_cache()
+
+    def tearDown(self):
+        """Clear cache after each test"""
+        clear_firmware_cache()
+
+    def _discover(self, mock_get_caps, host_caps, loaders_by_arch):
+        """Run get_uefi_files against a hypervisor with no firmware metadata"""
+
+        def capabilities(conn, emulatorbin, arch, machine, flags):
+            return domain_caps_xml(loaders_by_arch.get(arch, []))
+
+        mock_get_caps.side_effect = capabilities
+
+        mock_conn = MagicMock()
+        mock_conn.getCapabilities.return_value = host_caps
+
+        # No JSON metadata: the loaders alone have to carry the architecture
+        with patch(
+            "vmanager.firmware_manager._load_firmware_from_files",
+            side_effect=OSError("No metadata"),
+        ):
+            return get_uefi_files(mock_conn, use_cache=False)
+
+    @patch("vmanager.firmware_manager.get_domain_capabilities_xml")
+    def test_every_architecture_is_queried(self, mock_get_caps):
+        """Domain capabilities are asked for once per architecture reported"""
+        firmwares = self._discover(
+            mock_get_caps,
+            HOST_CAPS_X86_64_AND_AARCH64,
+            {"x86_64": [self.OVMF], "aarch64": [self.AAVMF]},
+        )
+
+        self.assertEqual(mock_get_caps.call_count, 2)
+        self.assertEqual(
+            sorted(f.executable for f in firmwares),
+            sorted([self.OVMF, self.AAVMF]),
+        )
+        self.assertEqual(
+            sorted(tuple(f.architectures) for f in firmwares),
+            [("aarch64",), ("x86_64",)],
+        )
+
+    @patch("vmanager.firmware_manager.get_domain_capabilities_xml")
+    def test_aarch64_firmware_is_selectable_from_an_x86_64_hypervisor(self, mock_get_caps):
+        """select_best_firmware finds AAVMF although the host is x86_64"""
+        firmwares = self._discover(
+            mock_get_caps,
+            HOST_CAPS_X86_64_AND_AARCH64,
+            {"x86_64": [self.OVMF], "aarch64": [self.AAVMF]},
+        )
+
+        selected = select_best_firmware(firmwares, architecture="aarch64")
+        self.assertEqual(selected.executable, self.AAVMF)
+
+    @patch("vmanager.firmware_manager.get_domain_capabilities_xml")
+    def test_machine_type_per_architecture(self, mock_get_caps):
+        """x86_64 asks for "pc", other architectures for libvirt's default"""
+        self._discover(
+            mock_get_caps,
+            HOST_CAPS_X86_64_AND_AARCH64,
+            {"x86_64": [self.OVMF], "aarch64": [self.AAVMF]},
+        )
+
+        machines = {
+            call.kwargs["arch"]: call.kwargs["machine"] for call in mock_get_caps.call_args_list
+        }
+        self.assertEqual(machines, {"x86_64": "pc", "aarch64": None})
+
+    @patch("vmanager.firmware_manager.get_domain_capabilities_xml")
+    def test_architecture_without_capabilities_is_skipped(self, mock_get_caps):
+        """An architecture whose capabilities fail does not hide the others"""
+
+        def capabilities(conn, emulatorbin, arch, machine, flags):
+            return None if arch == "aarch64" else domain_caps_xml([self.OVMF])
+
+        mock_get_caps.side_effect = capabilities
+
+        mock_conn = MagicMock()
+        mock_conn.getCapabilities.return_value = HOST_CAPS_X86_64_AND_AARCH64
+
+        with patch(
+            "vmanager.firmware_manager._load_firmware_from_files",
+            side_effect=OSError("No metadata"),
+        ):
+            firmwares = get_uefi_files(mock_conn, use_cache=False)
+
+        self.assertEqual([f.executable for f in firmwares], [self.OVMF])
+        self.assertEqual([f.architectures for f in firmwares], [["x86_64"]])
+
+    @patch("vmanager.firmware_manager.get_domain_capabilities_xml")
+    def test_loader_of_two_architectures_is_listed_once(self, mock_get_caps):
+        """A loader reported for two architectures is one Firmware with both"""
+        shared = "/usr/share/qemu/bios-256k.bin"
+        firmwares = self._discover(
+            mock_get_caps,
+            HOST_CAPS_X86_64_AND_AARCH64,
+            {"x86_64": [shared], "aarch64": [shared]},
+        )
+
+        self.assertEqual([f.executable for f in firmwares], [shared])
+        self.assertEqual(sorted(firmwares[0].architectures), ["aarch64", "x86_64"])
+
+    @patch("vmanager.firmware_manager.get_domain_capabilities_xml")
+    def test_capabilities_without_architectures_ask_x86_64(self, mock_get_caps):
+        """A hypervisor reporting no architecture keeps the x86_64 query"""
+        firmwares = self._discover(
+            mock_get_caps, "<capabilities></capabilities>", {"x86_64": [self.OVMF]}
+        )
+
+        self.assertEqual(mock_get_caps.call_count, 1)
+        self.assertEqual([f.architectures for f in firmwares], [["x86_64"]])
+
+    @patch("vmanager.firmware_manager.get_domain_capabilities_xml")
+    def test_aarch64_metadata_survives_x86_64_only_host(self, mock_get_caps):
+        """An aarch64 firmware file is kept although the host only discovers x86_64"""
+        mock_get_caps.return_value = domain_caps_xml([self.OVMF])
+
+        def populate_files(files):
+            """Stand in for the aarch64 metadata of /usr/share/qemu/firmware"""
+            aavmf = Firmware()
+            aavmf.load_from_json(
+                {
+                    "interface-types": ["uefi"],
+                    "mapping": {
+                        "executable": {"filename": self.AAVMF},
+                        "nvram-template": {"filename": "/usr/share/qemu/aavmf-aarch64-vars.bin"},
+                    },
+                    "targets": [{"architecture": "aarch64", "machines": ["virt"]}],
+                }
+            )
+            files.append(aavmf)
+
+        mock_conn = MagicMock()
+        mock_conn.getCapabilities.return_value = HOST_CAPS_X86_64
+
+        with patch(
+            "vmanager.firmware_manager._load_firmware_from_files",
+            side_effect=populate_files,
+        ):
+            firmwares = get_uefi_files(mock_conn, use_cache=False)
+
+        selected = select_best_firmware(firmwares, architecture="aarch64")
+        self.assertIsNotNone(selected, "the aarch64 firmware must not be rejected")
+        self.assertEqual(selected.executable, self.AAVMF)
+
+    @patch("vmanager.firmware_manager.get_domain_capabilities_xml")
+    def test_ovmf_code_fd_fallback_without_metadata(self, mock_get_caps):
+        """Without metadata, OVMF_CODE.fd still gives a firmware with guessed NVRAM"""
+        code = "/usr/share/OVMF/OVMF_CODE.fd"
+        firmwares = self._discover(mock_get_caps, HOST_CAPS_X86_64, {"x86_64": [code]})
+
+        self.assertEqual([f.executable for f in firmwares], [code])
+
+        selected = select_best_firmware(firmwares, architecture="x86_64")
+        self.assertEqual(selected.executable, code)
+        self.assertEqual(selected.nvram_template, "/usr/share/OVMF/OVMF_VARS.fd")
+        self.assertEqual(selected.architectures, ["x86_64"])
 
 
 class TestFirmwareSelection(unittest.TestCase):
@@ -517,6 +734,7 @@ class TestFirmwareCaching(unittest.TestCase):
         mock_load_files.side_effect = populate_files
 
         mock_conn = MagicMock()
+        mock_conn.getCapabilities.return_value = HOST_CAPS_X86_64
 
         # First call - should load from libvirt
         result1 = get_uefi_files(mock_conn, use_cache=True)
@@ -561,6 +779,7 @@ class TestFirmwareCaching(unittest.TestCase):
         mock_load_files.side_effect = populate_files
 
         mock_conn = MagicMock()
+        mock_conn.getCapabilities.return_value = HOST_CAPS_X86_64
 
         # First call - populates cache
         result1 = get_uefi_files(mock_conn, use_cache=True)
