@@ -47,6 +47,11 @@ from .utils import (
 )
 from .vm_actions import delete_boot_files, get_vm_boot_files, strip_installation_assets
 
+# Where a caller's own facts about a machine live in its XML: a namespace of
+# ours, so another tool's metadata sits beside it untouched.
+METADATA_NS = "https://virtui-manager/metadata/1"
+METADATA_ELEMENT = "properties"
+
 
 class VMType(Enum):
     SECURE = StaticText.VM_TYPE_SECURE
@@ -2421,6 +2426,202 @@ class VMProvisioner:
             if not ok:
                 missing.append(tool)
         return missing
+
+    def provision_existing_volume(
+        self,
+        vm_name: str,
+        disk_path: str,
+        disk_format: str = "qcow2",
+        seed_path: str | None = None,
+        memory_mb: int = 2048,
+        vcpu_count: int = 2,
+        network_name: str = "default",
+        storage_pool_name: str = "default",
+        boot_uefi: bool = False,
+        machine_type: str | None = None,
+        graphics: str | None = None,
+        boot_device: str = "disk",
+        metadata: Dict[str, Any] | None = None,
+        start: bool = True,
+        progress_callback: Optional[Callable[[int, str], None]] = None,
+    ) -> libvirt.virDomain:
+        """Define a machine that boots a disk which already exists.
+
+        Nothing here installs: the disk is whatever the caller put in the pool,
+        and the machine is built around it. That is the difference from
+        `provision_vm`, which spends its time on install media, automation and
+        kernel extraction. A caller that has a qcow2 image - one it built, one it
+        copied from another host - wants a domain defined over it and started,
+        and nothing else.
+
+        Args:
+            disk_path: Path of the volume to boot, in a pool libvirt can see.
+            disk_format: `qcow2` or `raw`, as the volume is formatted.
+            seed_path: Path of an ISO to attach as a second, read-only CD-ROM -
+                the NoCloud seed a machine reads its name, key and user-data from.
+            boot_device: `disk`, or `cdrom` when the seed (or the media the
+                machine was built from) is what should boot first.
+            metadata: Kept in the domain's `<metadata>` and reported back by
+                `vmc domain info`; nothing here interprets it.
+            start: Whether to boot it, or only define it.
+
+        Returns the defined domain.
+        """
+
+        def report(progress: int, message: str = None) -> None:
+            if progress_callback:
+                progress_callback(progress, message)
+            else:
+                logging.info(f"[{progress}%] {message}")
+
+        machine_types = get_latest_machine_types(self.conn, self.host_arch)
+        default_machine = machine_types["pc-q35"] if boot_uefi else machine_types["pc-i440fx"]
+        machine = machine_type or default_machine
+
+        loader_path = nvram_path = None
+        if boot_uefi:
+            report(20, "Preparing the UEFI variables")
+            loader_path, nvram_path = self._setup_uefi_nvram(
+                vm_name, storage_pool_name, VMType.SERVER
+            )
+
+        report(40, "Defining the machine")
+        xml = self._volume_boot_xml(
+            vm_name=vm_name,
+            disk_path=disk_path,
+            disk_format=disk_format,
+            seed_path=seed_path,
+            memory_mb=memory_mb,
+            vcpu_count=vcpu_count,
+            network_name=network_name,
+            machine=machine,
+            boot_uefi=boot_uefi,
+            loader_path=loader_path,
+            nvram_path=nvram_path,
+            graphics=graphics,
+            boot_device=boot_device,
+            metadata=metadata,
+        )
+        try:
+            domain = self.conn.defineXML(xml)
+        except libvirt.libvirtError as e:
+            raise RuntimeError(f"libvirt refused the machine: {e}") from e
+
+        if start:
+            report(60, "Starting the machine")
+            try:
+                if not domain.isActive():
+                    domain.create(0)
+            except libvirt.libvirtError as e:
+                raise RuntimeError(f"The machine is defined but would not start: {e}") from e
+
+        report(100, f"{vm_name} is {'running' if start else 'defined'}")
+        return domain
+
+    def _volume_boot_xml(
+        self,
+        vm_name: str,
+        disk_path: str,
+        disk_format: str,
+        seed_path: str | None,
+        memory_mb: int,
+        vcpu_count: int,
+        network_name: str,
+        machine: str,
+        boot_uefi: bool,
+        loader_path: str | None,
+        nvram_path: str | None,
+        graphics: str | None,
+        boot_device: str,
+        metadata: Dict[str, Any] | None,
+    ) -> str:
+        """The domain XML for a machine that boots a disk it already has.
+
+        Small on purpose: a disk, the seed, one virtio NIC on the network the
+        caller named, a serial console, and nothing a headless machine has no use
+        for. `graphics` names a graphics device when the caller wants a screen.
+        """
+        # The seed boots first only when the caller says so; a built machine reads
+        # it once and then lives on its disk.
+        disk_boot, seed_boot = ("2", "1") if boot_device == "cdrom" else ("1", "2")
+
+        os_element = f"  <os>\n    <type arch='{self.host_arch}' machine='{machine}'>hvm</type>\n"
+        if boot_uefi and loader_path:
+            os_element += f"    <loader readonly='yes' type='pflash'>{loader_path}</loader>\n"
+            os_element += f"    <nvram>{nvram_path}</nvram>\n"
+        os_element += "    <boot dev='%s'/>\n" % ("cdrom" if boot_device == "cdrom" else "hd")
+        os_element += "  </os>\n"
+
+        xml = f"""<domain type='kvm'>
+  <name>{vm_name}</name>
+  <memory unit='MiB'>{memory_mb}</memory>
+  <currentMemory unit='MiB'>{memory_mb}</currentMemory>
+  <vcpu placement='static'>{vcpu_count}</vcpu>
+{os_element}  <features>
+    <acpi/>
+    <apic/>
+  </features>
+  <cpu mode='host-passthrough' check='none' migratable='on'/>
+  <clock offset='utc'/>
+  <on_poweroff>destroy</on_poweroff>
+  <on_reboot>restart</on_reboot>
+  <on_crash>destroy</on_crash>
+"""
+        if metadata:
+            xml += self._metadata_xml(metadata)
+
+        xml += "  <devices>\n"
+        xml += f"""    <disk type='file' device='disk'>
+      <driver name='qemu' type='{disk_format}' cache='none'/>
+      <source file='{disk_path}'/>
+      <target dev='vda' bus='virtio'/>
+      <boot order='{disk_boot}'/>
+    </disk>
+"""
+        if seed_path:
+            xml += f"""    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <source file='{seed_path}'/>
+      <target dev='sda' bus='sata'/>
+      <readonly/>
+      <boot order='{seed_boot}'/>
+    </disk>
+"""
+        xml += f"""    <interface type='network'>
+      <source network='{network_name}'/>
+      <model type='virtio'/>
+    </interface>
+    <console type='pty'>
+      <target type='serial' port='0'/>
+    </console>
+    <memballoon model='virtio'/>
+"""
+        if graphics:
+            xml += f"""    <video>
+      <model type='virtio'/>
+    </video>
+    <graphics type='{graphics}' port='-1' autoport='yes' listen='127.0.0.1'>
+      <listen type='address' address='127.0.0.1'/>
+    </graphics>
+"""
+        xml += "  </devices>\n</domain>\n"
+        return xml
+
+    @staticmethod
+    def _metadata_xml(metadata: Dict[str, Any]) -> str:
+        """A caller's own facts about a machine, kept in its XML and reported back.
+
+        They live in a namespace of ours so another tool's metadata sits beside
+        them untouched. Values are escaped: a name a caller typed cannot close the
+        element it is in.
+        """
+        from xml.sax.saxutils import escape
+
+        lines = ["  <metadata>\n    <%s xmlns='%s'>\n" % (METADATA_ELEMENT, METADATA_NS)]
+        for key, value in metadata.items():
+            lines.append(f"      <{escape(str(key))}>{escape(str(value))}</{escape(str(key))}>\n")
+        lines.append(f"    </{METADATA_ELEMENT}>\n  </metadata>\n")
+        return "".join(lines)
 
     def provision_vm(
         self,

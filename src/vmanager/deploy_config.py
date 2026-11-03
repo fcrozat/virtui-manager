@@ -1,14 +1,19 @@
 """
 Declarative deployment configuration for ``vmc --config``.
 
-Loads and validates a JSON file that describes a *single* VM deployment in
-auto-install mode. Today only openSUSE / SLES is supported (AutoYaST and Agama
-auto-install, with optional SUSE Customer Center registration).
+Loads and validates a JSON file that describes a *single* VM deployment. There
+are two shapes, and a file is one or the other:
+
+* an **install**: ``iso`` names install media, and ``autoinstall`` (optional)
+  describes the answer file it should be handed. ``VMProvisioner.provision_vm``
+  performs it.
+* a **boot**: ``disk.volume`` names a disk the storage pool already holds, and
+  the machine is defined over it without installing anything.
+  ``VMProvisioner.provision_existing_volume`` performs it.
 
 This module only *describes* the deployment: it performs no libvirt operation
 and never touches the network. The resolved values are handed straight through
-to ``VMProvisioner.provision_vm`` by the CLI, so all the real work reuses the
-existing provisioning path.
+to the provisioner by the CLI.
 """
 
 from __future__ import annotations
@@ -26,6 +31,10 @@ class DeployConfigError(Exception):
 
 # Allowed values for the ``iso.source`` field.
 ISO_SOURCES = ("url", "pool", "cached", "repository")
+
+# What may boot first: the disk the machine lives on, or the CD-ROM the caller
+# attached (install media, or a seed a built machine is configured from).
+BOOT_DEVICES = ("disk", "cdrom")
 
 # ``vm_type`` may be one of the VMType profile names (lowercase) or this value,
 # which lets the user supply memory/disk/vCPU manually instead of a profile.
@@ -117,8 +126,56 @@ def _validate(cfg: Dict[str, Any]) -> None:
     cfg["storage_pool"] = cfg.get("storage_pool", "default")
     cfg["start"] = bool(cfg.get("start", True))
 
-    # --- iso ---
+    boot = cfg.get("boot", "disk")
+    if boot not in BOOT_DEVICES:
+        raise DeployConfigError(f"'boot' must be one of {', '.join(BOOT_DEVICES)} (got '{boot}')")
+    cfg["boot"] = boot
+
+    # --- disk: the volume to boot, instead of installing ---
+    disk = cfg.get("disk") or {}
+    if not isinstance(disk, dict):
+        raise DeployConfigError("'disk' must be an object")
+    cfg["disk_volume"] = disk.get("volume")
+    cfg["backing_volume"] = disk.get("backing_volume")
+    if cfg["backing_volume"] and not cfg["disk_volume"]:
+        raise DeployConfigError("disk.backing_volume needs disk.volume to overlay")
+
+    # --- seed: a read-only CD-ROM the guest reads its configuration from ---
+    seed = cfg.get("seed")
+    if seed is None:
+        cfg["seed_volume"] = None
+    elif not isinstance(seed, dict):
+        raise DeployConfigError("'seed' must be an object")
+    else:
+        cfg["seed_volume"] = seed.get("volume")
+        if not cfg["seed_volume"]:
+            raise DeployConfigError("seed.volume is required when 'seed' is given")
+
+    # --- metadata: whose this machine is, kept in its XML and reported back ---
+    metadata = cfg.get("metadata")
+    if metadata is None:
+        cfg["metadata"] = {}
+    elif not isinstance(metadata, dict):
+        raise DeployConfigError("'metadata' must be an object")
+    else:
+        for key, value in metadata.items():
+            if not isinstance(value, (str, int, float, bool)):
+                raise DeployConfigError(
+                    f"metadata.{key} must be a single value, not {type(value).__name__}"
+                )
+        cfg["metadata"] = {str(k): str(v) for k, v in metadata.items()}
+
+    # --- iso: required to install, forbidden when booting a volume ---
     iso = cfg.get("iso")
+    if cfg["disk_volume"]:
+        if iso:
+            raise DeployConfigError(
+                "disk.volume and iso describe different deployments: a machine boots "
+                "a disk it has, or it installs from media, not both"
+            )
+        if cfg.get("autoinstall"):
+            raise DeployConfigError("autoinstall needs install media; disk.volume installs nothing")
+        return
     if not isinstance(iso, dict):
         raise DeployConfigError("Missing required object: 'iso'")
     source = iso.get("source", "url")

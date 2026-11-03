@@ -11,6 +11,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   object on stdout, command output and progress as log lines on stderr, and an
   exit status per failure (see the "Machine-Readable Output" section of the CLI
   manual). Written so that a program can drive `vmc` without parsing prose.
+- `vmc -u/--uri`, which connects to the uri it is given and to nothing else,
+  so a scripted caller says which hypervisor it means instead of relying on the
+  local `autoconnect` configuration. With `--json` it replaces the `server`
+  field of the deployment file.
+- Resource commands for a scripted caller, machine-readable like `deploy`:
+  `host capabilities`, `host resources`, `pool list|info|create|delete`,
+  `volume list|info|upload|create-overlay|delete|rename`,
+  `domain list|state|address|start|shutdown|destroy|reboot`,
+  `network list|info`. Uploading an image streams it into the pool, and an
+  overlay records the base it was made from, so a machine can start from a
+  shared image and write nowhere else.
+- Config-driven deployment can boot a disk instead of installing one: `disk.volume`
+  names a volume in the pool (with `disk.backing_volume` to make it as an
+  overlay first), `seed.volume` attaches a read-only cloud-init cdrom, and
+  `metadata` records what the machine is for in its domain XML. See the
+  "Booting a disk instead of installing" section of the CLI manual.
 - `machine info` command, reporting the protocol version, the version of
   virtui-manager and the commands it answers to in machine mode.
 - `vmc --version`.

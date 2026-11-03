@@ -351,6 +351,50 @@ the ISO sources offered by `installvm`). `autoinstall.packages` adds extra
 packages on top of the template defaults, and `autoinstall.scc` registers the
 installed system with the SUSE Customer Center.
 
+### Booting a disk instead of installing
+
+A deployment does not have to install anything. `disk.volume` names a volume in
+the storage pool — one that `volume upload` put there, or one that
+`volume create-overlay` made from a base — and the machine boots from it:
+
+```json
+{
+  "server": "Localhost",
+  "vm_name": "worker01",
+  "vm_type": "custom",
+  "memory_mb": 2048,
+  "vcpu": 2,
+  "disk_size_gb": 20,
+  "storage_pool": "default",
+  "disk": { "volume": "worker01-disk" },
+  "seed": { "volume": "worker01-seed" },
+  "metadata": { "mcp-sidekick": "instance", "instance": "worker01" },
+  "start": true
+}
+```
+
+*   **`disk.volume`** — the name of the volume in `storage_pool` to boot from.
+    With `disk.backing_volume`, the disk is created first as a qcow2 overlay of
+    that base volume, so a machine starts from a shared base and writes nowhere
+    else.
+*   **`seed.volume`** — a volume attached as a second, read-only `cdrom`.
+    Whatever is in it (cloud-init, Ignition, a tarball) is what the image on the
+    disk reads on first boot.
+*   **`metadata`** — strings stored on the domain, in their own namespace, so a
+    caller can find its own machines again and know what each is for. A value
+    cannot escape the element it is written into.
+*   **`boot`** — `disk` (default when there is no installer) or `cdrom`; with a
+    seed present this decides which of the two the firmware tries first.
+
+An `iso` and a `disk.volume` are two ways of making a machine and cannot both
+be in one file; `autoinstall` needs an `iso`, since there is nothing to answer
+for a disk that is already installed. This path asks for no screen: pass
+`graphics` (`vnc` or `spice`) when you want one.
+
+The volumes have to be in the pool before the deploy runs, and libvirt has to
+see them — `volume upload` and `volume create-overlay` do that, or the files
+were put in the pool's directory and the pool refreshed.
+
 ### Managing deployment JSON files
 
 *   **`list_json`** (inside the CLI): lists all deployment JSON files you have
@@ -425,6 +469,49 @@ Before it, a long command may report what it is doing, one event per line:
 ```json
 {"event": "progress", "stage": "downloading", "message": "Downloading ISO", "percent": 45}
 ```
+
+### Resource commands
+
+The commands a program needs to prepare a machine, and to ask what the
+hypervisor has, answer the same way as `deploy` does — one JSON object, an exit
+status that means something:
+
+```bash
+$ vmc -u qemu:///system --machine -c "host capabilities"
+{"ok": true, "command": "host capabilities", "data": {"hostname": "h1", "architectures": ["x86_64", "aarch64"], "host_cpus": 8, "memory_mb": 32768, "uefi": true}}
+
+$ vmc -u qemu:///system --machine -c "pool list"
+{"ok": true, "command": "pool list", "data": {"pools": [{"name": "default", "state": "running", "path": "/var/lib/libvirt/images", ...}]}}
+
+# Put an image in a pool, then make a machine that starts from it and writes nowhere else
+$ vmc --machine -c "volume upload --pool default --name base.qcow2 --file /tmp/base.qcow2 --format qcow2"
+$ vmc --machine -c "volume create-overlay --pool default --name worker01 --backing base.qcow2 --size 20"
+
+# A name that is taken is status 6, and the machine that is not there is status 5
+$ vmc --machine -c "pool create sidekick --path /srv/sidekick"
+{"ok": false, "command": "pool create", "code": "already_exists", "message": "A pool named 'sidekick' already exists."}
+```
+
+| Command | Answers with |
+| --- | --- |
+| `host capabilities` | hostname, the architectures guests can have, host CPUs, memory, UEFI. |
+| `host resources` | the same CPUs and memory, plus what a new machine could be given. |
+| `pool list` / `pool info --pool P` | the pools and their state, path and free space. |
+| `pool create --pool P [--path D]` | the pool it made. Without `--path`, a directory named after the pool. |
+| `volume list --pool P` / `volume info --pool P --name V` | volumes with their size, format and path. |
+| `volume upload --pool P --name V --file F [--format raw\|qcow2]` | the volume, with the bytes it wrote. Streams; a whole image is never in memory. |
+| `volume create-overlay --pool P --name V --backing B [--size GB]` | the new volume, whose backing file is `B`. |
+| `volume delete --pool P --name V` / `volume rename --pool P --name V --new-name W` | what happened to the volume. |
+| `domain list [--prefix X]` | the domains and their state; `--prefix` keeps the names that start with it. |
+| `domain state <name>` | whether it runs, and whether libvirt has it at all. |
+| `domain address <name>` | its lease address, `ipv4` null when it has none yet. |
+| `domain start\|shutdown\|destroy\|reboot <name>` | the domain, after it was told. |
+| `network list` / `network info --network N` | the networks and their state, and `active` for a network without libvirt state. |
+| `machine info` | protocol version, name, version, and every command this vmc answers. |
+
+`volume delete` will not remove a volume a running machine is using — that is
+status 7, not a libvirt traceback. `pool delete` removes the pool definition
+and leaves its files to whoever owns them.
 
 ### Choosing the hypervisor
 

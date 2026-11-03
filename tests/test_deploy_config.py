@@ -283,5 +283,81 @@ class TestOpenSUSEPackages(unittest.TestCase):
         self.assertNotIn("<package>ssh</package>", content)
 
 
+class TestBootConfig(unittest.TestCase):
+    """The shape of a config that boots a disk the pool already has (no install)."""
+
+    def _write(self, obj, name="boot.json"):
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(obj, f)
+            path = f.name
+        self.addCleanup(os.unlink, path)
+        return path
+
+    def _boot(self, **extra):
+        cfg = {
+            "server": "Localhost",
+            "vm_name": "worker01",
+            "vm_type": "custom",
+            "memory_mb": 2048,
+            "vcpu": 2,
+            "disk_size_gb": 20,
+            "disk": {"volume": "sidekick-worker01"},
+            "seed": {"volume": "sidekick-worker01-seed"},
+            "metadata": {"mcp-sidekick": "instance", "instance": "worker01"},
+        }
+        cfg.update(extra)
+        return load_deploy_config(self._write(cfg))
+
+    def test_a_volume_needs_no_iso(self):
+        cfg = self._boot()
+        self.assertEqual(cfg["disk_volume"], "sidekick-worker01")
+        self.assertEqual(cfg["seed_volume"], "sidekick-worker01-seed")
+        self.assertEqual(cfg["boot"], "disk")
+        self.assertEqual(cfg["metadata"]["instance"], "worker01")
+
+    def test_a_number_in_metadata_is_kept_as_text(self):
+        cfg = self._boot(metadata={"cpus": 4})
+        self.assertEqual(cfg["metadata"]["cpus"], "4")
+
+    def test_media_and_a_boot_volume_are_two_deployments(self):
+        with self.assertRaises(DeployConfigError) as raised:
+            self._boot(iso={"source": "url", "url": "u"})
+        self.assertIn("not both", str(raised.exception))
+
+    def test_a_backing_volume_needs_the_volume_it_underlays(self):
+        cfg = {
+            "server": "s",
+            "vm_name": "v",
+            "vm_type": "custom",
+            "memory_mb": 1024,
+            "vcpu": 1,
+            "disk_size_gb": 10,
+            "disk": {"backing_volume": "base"},
+        }
+        with self.assertRaises(DeployConfigError) as raised:
+            load_deploy_config(self._write(cfg))
+        self.assertIn("needs disk.volume", str(raised.exception))
+
+    def test_a_seed_without_a_volume_is_not_a_seed(self):
+        with self.assertRaises(DeployConfigError) as raised:
+            self._boot(seed={})
+        self.assertIn("seed.volume", str(raised.exception))
+
+    def test_metadata_holds_one_value_each(self):
+        with self.assertRaises(DeployConfigError) as raised:
+            self._boot(metadata={"a": {"b": "c"}})
+        self.assertIn("single value", str(raised.exception))
+
+    def test_boot_is_either_disk_or_cdrom(self):
+        with self.assertRaises(DeployConfigError) as raised:
+            self._boot(boot="floppy")
+        self.assertIn("disk, cdrom", str(raised.exception))
+
+    def test_an_answer_file_needs_something_to_answer(self):
+        with self.assertRaises(DeployConfigError) as raised:
+            self._boot(autoinstall={"enabled": True, "template": "autoyast-server.xml"})
+        self.assertIn("install media", str(raised.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,490 @@
+# The fakes here are named as libvirt names its methods, which is what makes them useful
+# fakes; the naming rules are about the code we own.
+# ruff: noqa: N802, UP031
+"""Tests for the resource commands of ``vmc --machine`` (pool, volume, domain, network, host).
+
+The hypervisor is a fake: these commands are about the words they take, the
+answer they give and the status they leave with, and all three can be checked
+without libvirt answering. What the fake does answer is the shape the real
+libvirt returns, so a change in one of them shows up here.
+"""
+
+import io
+import json
+import unittest
+from unittest.mock import MagicMock, patch
+
+import libvirt
+
+from vmanager.machine_mode import (
+    EXIT_CONFIG,
+    EXIT_CONNECTION,
+    EXIT_EXISTS,
+    EXIT_NOT_FOUND,
+    EXIT_OPERATION,
+    EXIT_USAGE,
+    MachineError,
+    MachineSession,
+    run_command,
+)
+from vmanager.machine_resources import STATE_NAMES  # noqa: F401  (registers the commands)
+
+
+class FakePool:
+    """A storage pool with volumes in it, as ``machine_resources`` sees it."""
+
+    def __init__(
+        self, name, path="/var/lib/libvirt/images", capacity=100 * 1024**3, free=40 * 1024**3
+    ):
+        self._name = name
+        self.path = path
+        self.capacity = capacity
+        self.free = free
+        self.volumes = {}
+
+    def name(self):
+        return self._name
+
+    def isActive(self):
+        return 1
+
+    def XMLDesc(self, _flags=0):
+        return "<pool><target><path>%s</path></target></pool>" % self.path
+
+    def listVolumes(self):
+        return list(self.volumes)
+
+    def storageVolLookupByName(self, name):
+        if name not in self.volumes:
+            raise libvirt_error(libvirt.VIR_ERR_NO_STORAGE_VOL, "No such volume")
+        return self.volumes[name]
+
+    def info(self):
+        return (
+            libvirt.VIR_STORAGE_POOL_RUNNING,
+            self.capacity,
+            self.capacity - self.free,
+            self.free,
+        )
+
+    def refresh(self, _flags=0):
+        return 0
+
+    def createXML(self, xml, _flags=0):
+        """Make a volume out of the XML it is given, as libvirt would."""
+        import xml.etree.ElementTree as ET
+
+        root = ET.fromstring(xml)
+        name = root.find("name").text
+        format_element = root.find("target/format")
+        volume = FakeVolume(
+            name,
+            self.path,
+            fmt=format_element.get("type") if format_element is not None else "raw",
+            capacity=int(
+                root.find("capacity").get("unit") == "bytes" and root.find("capacity").text
+            ),
+        )
+        self.volumes[name] = volume
+        return volume
+
+    # Used only by the helpers this module borrows from storage_manager.
+    def XMLDescBytes(self):  # pragma: no cover - documentation of the shape
+        return self.XMLDesc().encode()
+
+
+class FakeVolume:
+    """A volume: its bytes, its format, and what libvirt is asked to do with them."""
+
+    def __init__(
+        self, name, pool_path="/var/lib/libvirt/images", fmt="qcow2", capacity=8 * 1024**3
+    ):
+        self._name = name
+        self.filepath = f"{pool_path}/{name}"
+        self.fmt = fmt
+        self.capacity = capacity
+        self.deleted_with = None
+        self.renamed_to = None
+
+    def name(self):
+        return self._name
+
+    def path(self):
+        return self.filepath
+
+    def info(self):
+        return (libvirt.VIR_STORAGE_VOL_FILE, self.capacity, 1024)
+
+    def XMLDesc(self, _flags=0):
+        return (
+            "<volume><capacity unit='bytes'>%d</capacity>"
+            "<allocation unit='bytes'>1024</allocation>"
+            "<target><path>%s</path><format type='%s'/></target></volume>"
+            % (self.capacity, self.filepath, self.fmt)
+        )
+
+    def delete(self, flags=0):
+        self.deleted_with = flags
+
+    def rename(self, new_name, _flags=0):
+        self.renamed_to = new_name
+
+    def upload(self, stream, _offset, _length):
+        self.stream = stream
+
+
+class FakeDomain:
+    def __init__(self, name, state=None, active=True):
+        self._name = name
+        self.state = libvirt.VIR_DOMAIN_RUNNING if state is None else state
+        self.active = active
+        self.actions = []
+
+    def name(self):
+        return self._name
+
+    def info(self):
+        return (self.state, 1024**3, 1024**3, 1, 0)
+
+    def isActive(self):
+        return 1 if self.active else 0
+
+    def create(self, _flags=0):
+        self.actions.append("start")
+        self.active = True
+
+    def poweroff(self):
+        self.actions.append("shutdown")
+        self.active = False
+
+    def reboot(self, _flags=0):
+        self.actions.append("reboot")
+
+    def destroy(self):
+        self.actions.append("destroy")
+        self.active = False
+
+    def undefineFlags(self, _flags=0):
+        self.actions.append("undefine")
+
+    def listAllSnapshots(self):
+        return []
+
+
+class FakeConnection:
+    """The pieces of a libvirt connection these commands use."""
+
+    def __init__(self):
+        self.pools = {}
+        self.domains = {}
+        self.networks = {}
+        self.hostname = "hypervisor.example.com"
+        self.capabilities = (
+            "<capabilities>"
+            "<guest><arch name='x86_64'><machine>pc-q35-8.2</machine>"
+            "<loader readonly='yes' type='pflash'>/usr/share/OVMF/OVMF_CODE.fd</loader>"
+            "</arch></guest>"
+            "</capabilities>"
+        )
+        self.streams = []
+
+    def listAllStoragePools(self, _flags=0):
+        return list(self.pools.values())
+
+    def storagePoolLookupByName(self, name):
+        if name not in self.pools:
+            raise libvirt_error(libvirt.VIR_ERR_NO_STORAGE_POOL, "No such pool")
+        return self.pools[name]
+
+    def listAllDomains(self, _flags=0):
+        return list(self.domains.values())
+
+    def lookupByName(self, name):
+        if name not in self.domains:
+            raise libvirt_error(libvirt.VIR_ERR_NO_DOMAIN, "No such domain")
+        return self.domains[name]
+
+    def listAllNetworks(self, _flags=0):
+        return list(self.networks.values())
+
+    def networkLookupByName(self, name):
+        if name not in self.networks:
+            raise libvirt_error(libvirt.VIR_ERR_NO_NETWORK, "No such network")
+        return self.networks[name]
+
+    def getHostname(self):
+        return self.hostname
+
+    def getCapabilities(self):
+        return self.capabilities
+
+    def getInfo(self):
+        # [model, memory (MB), cpus, mhz, nodes, sockets, cores, threads]
+        return ("x86_64", 32768, 8, 2400, 1, 1, 4, 2)
+
+    def getMemoryStats(self, _cells=0):
+        return {"total": 32 * 1024**2, "free": 8 * 1024**2}
+
+    def newStream(self, _flags=0):
+        stream = MagicMock()
+        self.streams.append(stream)
+        return stream
+
+
+def make_app(conn=None):
+    app = MagicMock()
+    app.active_connections = {} if conn is None else {"hypervisor": conn}
+    return app
+
+
+def answer(conn, command):
+    """Run a machine command and give back the `data` it answered with.
+
+    The result is the last object written: a command may have reported progress
+    before it.
+    """
+    out = io.StringIO()
+    run_command(make_app(conn), command, MachineSession(command, stdout=out))
+    return json.loads(out.getvalue().strip().splitlines()[-1])["data"]
+
+
+def libvirt_error(code, message="not there"):
+    """A libvirt error carrying the code libvirt would have set for it.
+
+    The bindings take the code from the C layer, so a fake says which one it
+    means the way upstream's tests do: by overriding the getter.
+    """
+
+    class _Error(libvirt.libvirtError):
+        def get_error_code(self):
+            return code
+
+    return _Error(message)
+
+
+class PoolCommandTest(unittest.TestCase):
+    def setUp(self):
+        self.conn = FakeConnection()
+        self.conn.pools["default"] = FakePool("default")
+
+    def test_list_reports_each_pool_with_its_room(self):
+        result = answer(self.conn, "pool list")
+        self.assertEqual(result["pools"][0]["name"], "default")
+        self.assertEqual(result["pools"][0]["state"], "active")
+        self.assertEqual(result["pools"][0]["capacity_mb"], 102400)
+        self.assertEqual(result["pools"][0]["available_mb"], 40960)
+
+    def test_info_names_the_pool_and_where_it_is(self):
+        result = answer(self.conn, "pool info default")
+        self.assertEqual(result["path"], "/var/lib/libvirt/images")
+
+    def test_an_absent_pool_is_status_five(self):
+        with self.assertRaises(MachineError) as raised:
+            answer(self.conn, "pool info nothing")
+        self.assertEqual(raised.exception.status, EXIT_NOT_FOUND)
+
+    def test_create_makes_a_pool_of_a_directory_of_its_own(self):
+        created = FakePool("sidekick", path="/srv/sidekick")
+        with patch("vmanager.machine_resources.create_storage_pool", return_value=created) as make:
+            result = answer(self.conn, "pool create sidekick --path /srv/sidekick")
+        self.assertEqual(make.call_args[0][1:3], ("sidekick", "dir"))
+        self.assertEqual(make.call_args[0][3], "/srv/sidekick")
+        self.assertEqual(result["name"], created.name())
+
+    def test_create_without_a_path_uses_a_directory_named_after_the_pool(self):
+        created = FakePool("sidekick", path="/var/lib/libvirt/sidekick")
+        with patch("vmanager.machine_resources.create_storage_pool", return_value=created) as make:
+            answer(self.conn, "pool create sidekick")
+        self.assertEqual(make.call_args[0][3], "/var/lib/libvirt/sidekick")
+
+    def test_a_pool_that_is_already_there_is_not_replaced(self):
+        with self.assertRaises(MachineError) as raised:
+            answer(self.conn, "pool create default")
+        self.assertEqual(raised.exception.status, EXIT_EXISTS)
+
+    def test_no_connection_is_a_connection_failure(self):
+        session = MachineSession("pool list")
+        with self.assertRaises(MachineError) as raised:
+            run_command(make_app(None), "pool list", session)
+        self.assertEqual(raised.exception.status, EXIT_CONNECTION)
+
+
+class VolumeCommandTest(unittest.TestCase):
+    def setUp(self):
+        self.conn = FakeConnection()
+        self.pool = FakePool("default")
+        self.conn.pools["default"] = self.pool
+        self.pool.volumes["base.qcow2"] = FakeVolume("base.qcow2")
+
+    def test_list_reports_the_volumes_of_one_pool(self):
+        result = answer(self.conn, "volume list --pool default")
+        self.assertEqual(result["pool"], "default")
+        self.assertEqual(result["volumes"][0]["name"], "base.qcow2")
+        self.assertEqual(result["volumes"][0]["format"], "qcow2")
+
+    def test_a_pool_that_is_not_named_is_a_usage_error(self):
+        with self.assertRaises(MachineError) as raised:
+            answer(self.conn, "volume list")
+        self.assertEqual(raised.exception.status, EXIT_USAGE)
+
+    def test_upload_streams_the_file_into_a_volume_of_its_size(self):
+        import os
+        from pathlib import Path
+
+        image = Path("/tmp") / "an-image.qcow2"
+        image.write_bytes(b"x" * 2048)
+        self.addCleanup(lambda: os.remove(image))
+
+        out = io.StringIO()
+        run_command(
+            make_app(self.conn),
+            f"volume upload --pool default --name disk.qcow2 --file {image} --format qcow2",
+            MachineSession("volume upload", stdout=out),
+        )
+        uploaded = self.pool.volumes["disk.qcow2"]
+        result = json.loads(out.getvalue().strip().splitlines()[-1])["data"]
+        self.assertEqual(result["bytes"], 2048)
+        self.conn.streams[-1].send.assert_called_once_with(b"x" * 2048)
+        self.conn.streams[-1].finish.assert_called_once()
+        self.assertEqual(uploaded.name(), "disk.qcow2")
+
+    def test_upload_of_a_file_that_is_not_there_is_a_config_error(self):
+        with self.assertRaises(MachineError) as raised:
+            answer(self.conn, "volume upload --pool default --name d --file /nope/nope")
+        self.assertEqual(raised.exception.status, EXIT_CONFIG)
+
+    def test_upload_does_not_take_a_name_that_is_used(self):
+        with self.assertRaises(MachineError) as raised:
+            answer(
+                self.conn,
+                "volume upload --pool default --name base.qcow2 --file /etc/hostname",
+            )
+        self.assertEqual(raised.exception.status, EXIT_EXISTS)
+
+    def test_create_overlay_records_the_volume_it_came_from(self):
+        with patch("vmanager.machine_resources.create_overlay_volume") as overlay:
+            made = FakeVolume("instance.qcow2")
+            overlay.return_value = made
+            result = answer(
+                self.conn,
+                "volume create-overlay --pool default --name instance.qcow2 --backing base.qcow2",
+            )
+        self.assertEqual(overlay.call_args[0][2], "/var/lib/libvirt/images/base.qcow2")
+        self.assertEqual(result["backing"], "/var/lib/libvirt/images/base.qcow2")
+
+    def test_create_overlay_asks_for_room_of_its_own(self):
+        with patch("vmanager.machine_resources.create_overlay_volume") as overlay:
+            overlay.return_value = FakeVolume("instance.qcow2")
+            answer(
+                self.conn,
+                "volume create-overlay --pool default --name instance.qcow2 "
+                "--backing base.qcow2 --size 40",
+            )
+        self.assertEqual(overlay.call_args[1]["size_bytes"], 40 * 1024**3)
+
+    def test_a_volume_that_is_not_there_is_status_five(self):
+        with self.assertRaises(MachineError) as raised:
+            answer(self.conn, "volume info --pool default --name nope")
+        self.assertEqual(raised.exception.status, EXIT_NOT_FOUND)
+
+    def test_delete_removes_it(self):
+        answer(self.conn, "volume delete --pool default --name base.qcow2")
+        self.assertEqual(self.pool.volumes["base.qcow2"].deleted_with, 0)
+
+    def test_rename_moves_it(self):
+        result = answer(
+            self.conn, "volume rename --pool default --name base.qcow2 --new-name other.qcow2"
+        )
+        self.assertEqual(self.pool.volumes["base.qcow2"].renamed_to, "other.qcow2")
+        self.assertEqual(result["name"], "other.qcow2")
+
+
+class DomainCommandTest(unittest.TestCase):
+    def setUp(self):
+        self.conn = FakeConnection()
+        self.conn.domains["sidekick-vm"] = FakeDomain("sidekick-vm")
+        self.conn.domains["quiet"] = FakeDomain(
+            "quiet", state=libvirt.VIR_DOMAIN_SHUTOFF, active=False
+        )
+
+    def test_list_reports_the_machines(self):
+        result = answer(self.conn, "domain list")
+        self.assertEqual(
+            sorted(entry["name"] for entry in result["domains"]), ["quiet", "sidekick-vm"]
+        )
+        self.assertEqual(
+            [entry["state"] for entry in result["domains"] if entry["name"] == "quiet"], ["stopped"]
+        )
+
+    def test_list_can_be_limited_to_what_one_caller_owns(self):
+        result = answer(self.conn, "domain list --prefix sidekick-")
+        self.assertEqual([entry["name"] for entry in result["domains"]], ["sidekick-vm"])
+
+    def test_state_of_a_machine_that_is_not_there_is_status_five(self):
+        with self.assertRaises(MachineError) as raised:
+            answer(self.conn, "domain state nope")
+        self.assertEqual(raised.exception.status, EXIT_NOT_FOUND)
+
+    def test_address_is_the_lease_without_its_prefix(self):
+        leases = [{"mac": "52:54:00:1", "ipv4": ["192.168.122.11/24"], "ipv6": []}]
+        with patch("vmanager.machine_resources.get_vm_network_ip", return_value=leases):
+            result = answer(self.conn, "domain address sidekick-vm")
+        self.assertEqual(result["ipv4"], "192.168.122.11")
+
+    def test_a_machine_with_no_lease_is_not_an_error(self):
+        with patch("vmanager.machine_resources.get_vm_network_ip", return_value=[]):
+            result = answer(self.conn, "domain address sidekick-vm")
+        self.assertIsNone(result["ipv4"])
+
+    def test_powering_on_a_machine_starts_it(self):
+        answer(self.conn, "domain start quiet")
+        self.assertEqual(self.conn.domains["quiet"].actions, ["start"])
+
+    def test_a_running_machine_is_not_undone(self):
+        with self.assertRaises(MachineError) as raised:
+            answer(self.conn, "domain undefine sidekick-vm")
+        self.assertEqual(raised.exception.status, EXIT_OPERATION)
+        self.assertEqual(self.conn.domains["sidekick-vm"].actions, [])
+
+    def test_a_stopped_machine_is_undone(self):
+        answer(self.conn, "domain undefine quiet")
+        self.assertEqual(self.conn.domains["quiet"].actions, ["undefine"])
+
+
+class NetworkAndHostTest(unittest.TestCase):
+    def setUp(self):
+        self.conn = FakeConnection()
+        self.conn.networks["default"] = MagicMock()
+        self.conn.networks["default"].name.return_value = "default"
+        self.conn.networks["default"].isActive.return_value = 1
+        self.conn.networks["default"].XMLDesc.return_value = (
+            "<network><bridge name='virbr0'/></network>"
+        )
+
+    def test_network_list_reports_what_is_there(self):
+        result = answer(self.conn, "network list")
+        self.assertEqual(result["networks"][0]["name"], "default")
+        self.assertEqual(result["networks"][0]["state"], "active")
+
+    def test_network_info_names_the_bridge(self):
+        result = answer(self.conn, "network info default")
+        self.assertEqual(result["bridge"], "virbr0")
+
+    def test_capabilities_say_what_can_run_here(self):
+        result = answer(self.conn, "host capabilities")
+        self.assertEqual(result["architectures"], ["x86_64"])
+        self.assertTrue(result["uefi"])
+        self.assertEqual(result["host_cpus"], 8)
+
+    def test_capabilities_of_a_hypervisor_without_uefi(self):
+        self.conn.capabilities = "<capabilities><guest><arch name='x86_64'/></guest></capabilities>"
+        result = answer(self.conn, "host capabilities")
+        self.assertFalse(result["uefi"])
+
+    def test_resources(self):
+        result = answer(self.conn, "host resources")
+        self.assertEqual(result["memory_mb"], 32768)
+
+
+if __name__ == "__main__":
+    unittest.main()

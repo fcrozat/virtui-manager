@@ -1,0 +1,673 @@
+"""Machine commands over a hypervisor's resources: pools, volumes, domains, networks, host.
+
+Documented with the rest of ``--machine`` in
+``documentation/manual/cli.md``. A scripted caller needs the facts these commands
+report and the operations they perform, with an exit status that says what
+happened; the interactive commands print prose and swallow failures, so these
+handlers are separate. They are thin: they read the words of the command, call
+the helper the interactive command calls, and return the ``data`` dict.
+
+One connection serves a run. ``vmc -u <uri>`` connects to that hypervisor before
+the command runs, which is what ``_connection`` returns; a command never picks a
+server of its own, since the caller named the one it means.
+"""
+
+import os
+import xml.etree.ElementTree as ET
+
+import libvirt
+
+from .libvirt_utils import get_host_resources
+from .machine_mode import (
+    EXIT_CONFIG,
+    EXIT_CONNECTION,
+    EXIT_EXISTS,
+    EXIT_NOT_FOUND,
+    EXIT_OPERATION,
+    EXIT_USAGE,
+    MachineError,
+    machine_command,
+)
+from .storage_manager import (
+    _ensure_pool_active,
+    _safe_get_pool_info,
+    _safe_get_volume_info,
+    _safe_get_volume_path,
+    create_overlay_volume,
+    create_storage_pool,
+    delete_volume,
+)
+from .vm_queries import get_vm_network_ip
+
+# Where the target of a pool created by name goes, as the images of a pool the
+# caller did not describe should not land in another pool's directory.
+POOL_PARENT = "/var/lib/libvirt"
+
+# The words of a domain's state, as a caller switches on them. libvirt numbers
+# them; the names are what a program compares, and what `vmc` prints.
+STATE_NAMES = {
+    libvirt.VIR_DOMAIN_NOSTATE: "nostate",
+    libvirt.VIR_DOMAIN_RUNNING: "running",
+    libvirt.VIR_DOMAIN_BLOCKED: "blocked",
+    libvirt.VIR_DOMAIN_PAUSED: "paused",
+    libvirt.VIR_DOMAIN_SHUTDOWN: "shutting down",
+    libvirt.VIR_DOMAIN_SHUTOFF: "stopped",
+    libvirt.VIR_DOMAIN_CRASHED: "crashed",
+    libvirt.VIR_DOMAIN_PMSUSPENDED: "suspended",
+}
+
+
+def _words(args):
+    """Split a command's words into its positionals and its ``--option value`` pairs."""
+    positional, options = [], {}
+    index = 0
+    while index < len(args):
+        word = args[index]
+        if word.startswith("--"):
+            name = word[2:]
+            if index + 1 >= len(args):
+                raise MachineError(f"--{name} needs a value.", EXIT_USAGE, "usage")
+            options[name] = args[index + 1]
+            index += 2
+        else:
+            positional.append(word)
+            index += 1
+    return positional, options
+
+
+def _required(options, name, command):
+    """The value of a mandatory option, or a usage error naming it."""
+    value = options.get(name)
+    if not value:
+        raise MachineError(f"{command} needs --{name}.", EXIT_USAGE, "usage")
+    return value
+
+
+def _connection(app):
+    """The connection of this run, which ``vmc -u`` opened before the command."""
+    if not app.active_connections:
+        raise MachineError(
+            "No hypervisor is connected. Pass -u <uri>.", EXIT_CONNECTION, "connection_failed"
+        )
+    if len(app.active_connections) > 1:
+        raise MachineError(
+            f"{len(app.active_connections)} hypervisors are connected, and a resource command "
+            "means one. Pass -u <uri> to name it.",
+            EXIT_CONFIG,
+            "ambiguous_connection",
+        )
+    return next(iter(app.active_connections.values()))
+
+
+def _not_found(error, what, name):
+    """Say whether a libvirt error means "there is no such thing"."""
+    codes = getattr(error, "get_error_code", lambda: None)()
+    missing = (
+        libvirt.VIR_ERR_NO_DOMAIN,
+        libvirt.VIR_ERR_NO_STORAGE_POOL,
+        libvirt.VIR_ERR_NO_STORAGE_VOL,
+        libvirt.VIR_ERR_NO_NETWORK,
+    )
+    if codes in missing:
+        return MachineError(f"No {what} '{name}'.", EXIT_NOT_FOUND, "not_found")
+    return MachineError(
+        f"Could not read the {what} '{name}': {error}", EXIT_OPERATION, "operation_failed"
+    )
+
+
+def _pool(conn, name):
+    try:
+        return conn.storagePoolLookupByName(name)
+    except libvirt.libvirtError as e:
+        raise _not_found(e, "storage pool", name) from e
+
+
+def _volume(pool, name):
+    try:
+        return pool.storageVolLookupByName(name)
+    except libvirt.libvirtError as e:
+        raise _not_found(e, "volume", name) from e
+
+
+def _domain(conn, name):
+    try:
+        return conn.lookupByName(name)
+    except libvirt.libvirtError as e:
+        raise _not_found(e, "domain", name) from e
+
+
+def _domain_state(domain):
+    try:
+        return STATE_NAMES.get(domain.info()[0], "unknown")
+    except libvirt.libvirtError:
+        # A domain can vanish between the lookup and the read. A caller that
+        # asked for its state is told "missing", which is what it has.
+        return "missing"
+
+
+def _volume_format(vol):
+    """The format of a volume's target, from its XML (`qcow2`, `raw`, ...)."""
+    try:
+        root = ET.fromstring(vol.XMLDesc(0))
+    except (libvirt.libvirtError, ET.ParseError):
+        return None
+    target = root.find("target/format")
+    return target.get("type") if target is not None else None
+
+
+def volume_path_and_format(vol):
+    """Where a volume's bytes are, and how they are formatted (`qcow2`, `raw`)."""
+    return _safe_get_volume_path(vol), _volume_format(vol)
+
+
+def _volume_entry(vol):
+    _type, capacity, allocation = _safe_get_volume_info(vol)
+    return {
+        "name": vol.name(),
+        "path": _safe_get_volume_path(vol),
+        "capacity_mb": round(capacity / 1024 / 1024),
+        "allocation_mb": round(allocation / 1024 / 1024),
+        "format": _volume_format(vol),
+    }
+
+
+# --------------------------------------------------------------------------------------
+# Storage pools
+# --------------------------------------------------------------------------------------
+
+
+@machine_command("pool")
+def _pool_command(app, args, _session):
+    """``pool list``, ``pool info <name>``, ``pool create <name> [--path <dir>]``."""
+    conn = _connection(app)
+    subcommand = args[0] if args else None
+    positional, options = _words(args[1:])
+
+    if subcommand == "list":
+        entries = []
+        for pool in conn.listAllStoragePools(0):
+            try:
+                name = pool.name()
+            except libvirt.libvirtError:
+                continue
+            capacity, allocation, available = _safe_get_pool_info(pool)
+            entries.append(
+                {
+                    "name": name,
+                    "state": "active" if pool.isActive() else "inactive",
+                    "capacity_mb": round(capacity / 1024 / 1024),
+                    "available_mb": round(available / 1024 / 1024),
+                }
+            )
+        return {"pools": entries}
+
+    if subcommand == "info":
+        if not positional:
+            raise MachineError("pool info needs a name.", EXIT_USAGE, "usage")
+        pool = _pool(conn, positional[0])
+        capacity, allocation, available = _safe_get_pool_info(pool)
+        return {
+            "name": pool.name(),
+            "state": "active" if pool.isActive() else "inactive",
+            "capacity_mb": round(capacity / 1024 / 1024),
+            "allocation_mb": round(allocation / 1024 / 1024),
+            "available_mb": round(available / 1024 / 1024),
+            "path": _pool_path(pool),
+        }
+
+    if subcommand == "create":
+        if not positional:
+            raise MachineError("pool create needs a name.", EXIT_USAGE, "usage")
+        name = positional[0]
+        # A scripted caller that only says a name means a directory pool of its
+        # own, not somebody else's images directory.
+        target = options.get("path") or os.path.join(POOL_PARENT, name)
+        try:
+            conn.storagePoolLookupByName(name)
+            raise MachineError(
+                f"A storage pool '{name}' is already defined.", EXIT_EXISTS, "exists"
+            )
+        except libvirt.libvirtError as e:
+            if e.get_error_code() != libvirt.VIR_ERR_NO_STORAGE_POOL:
+                raise _not_found(e, "storage pool", name) from e
+        try:
+            pool = create_storage_pool(conn, name, "dir", target)
+        except Exception as e:
+            raise MachineError(
+                f"Could not create the pool '{name}': {e}", EXIT_OPERATION, "operation_failed"
+            ) from e
+        return {"name": pool.name(), "path": _pool_path(pool)}
+
+    raise MachineError(f"Unknown pool subcommand '{subcommand}'.", EXIT_USAGE, "usage")
+
+
+def _pool_path(pool):
+    try:
+        root = ET.fromstring(pool.XMLDesc(0))
+        target = root.find("target/path")
+        return target.text if target is not None else None
+    except (libvirt.libvirtError, ET.ParseError):
+        return None
+
+
+# --------------------------------------------------------------------------------------
+# Storage volumes
+# --------------------------------------------------------------------------------------
+
+
+@machine_command("volume")
+def _volume_command(app, args, session):
+    """``volume list|info|upload|create-overlay|delete|rename --pool <pool> --name <name>``."""
+    conn = _connection(app)
+    subcommand = args[0] if args else None
+    positional, options = _words(args[1:])
+    if positional:
+        raise MachineError("Unexpected argument: " + positional[0], EXIT_USAGE, "usage")
+
+    if subcommand == "list":
+        pool = _pool(conn, _required(options, "pool", "volume list"))
+        _ensure_pool_active(pool)
+        try:
+            names = pool.listVolumes()
+        except libvirt.libvirtError as e:
+            raise MachineError(
+                f"Could not list the pool: {e}", EXIT_OPERATION, "operation_failed"
+            ) from e
+        entries = []
+        for name in names:
+            try:
+                entries.append(_volume_entry(pool.storageVolLookupByName(name)))
+            except libvirt.libvirtError:
+                continue
+        return {"pool": pool.name(), "volumes": entries}
+
+    if subcommand == "info":
+        pool = _pool(conn, _required(options, "pool", "volume info"))
+        vol = _volume(pool, _required(options, "name", "volume info"))
+        return _volume_entry(vol)
+
+    if subcommand == "upload":
+        return _volume_upload(conn, options, session)
+
+    if subcommand == "create-overlay":
+        pool = _pool(conn, _required(options, "pool", "volume create-overlay"))
+        name = _required(options, "name", "volume create-overlay")
+        backing_name = _required(options, "backing", "volume create-overlay")
+        backing = _volume(pool, backing_name)
+        backing_path = _safe_get_volume_path(backing)
+        if not backing_path:
+            raise MachineError(
+                f"The backing volume '{backing_name}' has no path to record.",
+                EXIT_OPERATION,
+                "operation_failed",
+            )
+        size = options.get("size")
+        if size is not None:
+            try:
+                size_bytes = int(float(size) * 1024**3)
+            except ValueError:
+                raise MachineError(
+                    f"--size must be a number of gigabytes (got '{size}').", EXIT_CONFIG, "config"
+                ) from None
+        else:
+            size_bytes = None
+        _refuse_existing(pool, name, options.get("force"))
+        try:
+            vol = create_overlay_volume(pool, name, backing_path, size_bytes=size_bytes)
+        except Exception as e:
+            raise MachineError(
+                f"Could not create the overlay '{name}': {e}", EXIT_OPERATION, "operation_failed"
+            ) from e
+        return {"name": vol.name(), "path": _safe_get_volume_path(vol), "backing": backing_path}
+
+    if subcommand == "delete":
+        pool = _pool(conn, _required(options, "pool", "volume delete"))
+        name = _required(options, "name", "volume delete")
+        vol = _volume(pool, name)
+        if options.get("force"):
+            try:
+                vol.delete(libvirt.VIR_STORAGE_VOL_DELETE_WITH_SNAPSHOTS)
+                return {"name": name}
+            except libvirt.libvirtError:
+                pass  # Fall through to a plain delete, which says what went wrong.
+        try:
+            delete_volume(vol)
+        except Exception as e:
+            raise MachineError(
+                f"Could not delete '{name}': {e}", EXIT_OPERATION, "operation_failed"
+            ) from e
+        return {"name": name}
+
+    if subcommand == "rename":
+        pool = _pool(conn, _required(options, "pool", "volume rename"))
+        name = _required(options, "name", "volume rename")
+        new_name = _required(options, "new-name", "volume rename")
+        vol = _volume(pool, name)
+        _refuse_existing(pool, new_name, options.get("force"))
+        try:
+            vol.rename(new_name, 0)
+        except libvirt.libvirtError as e:
+            raise MachineError(
+                f"Could not rename '{name}' to '{new_name}': {e}",
+                EXIT_OPERATION,
+                "operation_failed",
+            ) from e
+        # A pool needs a moment and a refresh before the new name is visible.
+        try:
+            pool.refresh(0)
+        except libvirt.libvirtError:
+            pass
+        return {"name": new_name, "was": name}
+
+    raise MachineError(f"Unknown volume subcommand '{subcommand}'.", EXIT_USAGE, "usage")
+
+
+def _refuse_existing(pool, name, force):
+    """Stop a create or a rename that would take a name the pool already has."""
+    if force:
+        return
+    try:
+        pool.storageVolLookupByName(name)
+    except libvirt.libvirtError as e:
+        if e.get_error_code() == libvirt.VIR_ERR_NO_STORAGE_VOL:
+            return
+        raise _not_found(e, "volume", name) from e
+    raise MachineError(f"A volume '{name}' is already in this pool.", EXIT_EXISTS, "exists")
+
+
+def _volume_upload(conn, options, session):
+    """``volume upload --pool P --name N --file F [--format raw|qcow2] [--force]``.
+
+    The volume is made the size of the file and filled in one stream, so a
+    caller with an image on its own disk does not have to reach the hypervisor's
+    filesystem. This is the same stream a restore uses.
+    """
+    pool = _pool(conn, _required(options, "pool", "volume upload"))
+    name = _required(options, "name", "volume upload")
+    source = _required(options, "file", "volume upload")
+    vol_format = options.get("format", "raw")
+    if vol_format not in ("raw", "qcow2"):
+        raise MachineError(
+            f"--format must be raw or qcow2 (got '{vol_format}').", EXIT_CONFIG, "config"
+        )
+    if not os.path.isfile(source):
+        raise MachineError(f"No such file: {source}", EXIT_CONFIG, "config")
+
+    _refuse_existing(pool, name, options.get("force"))
+    size = os.path.getsize(source)
+    vol_xml = (
+        f"<volume><name>{name}</name><capacity unit='bytes'>{size}</capacity>"
+        f"<target><format type='{vol_format}'/></target></volume>"
+    )
+    _ensure_pool_active(pool)
+    try:
+        vol = pool.createXML(vol_xml, 0)
+    except libvirt.libvirtError as e:
+        raise MachineError(
+            f"Could not create the volume '{name}': {e}", EXIT_OPERATION, "operation_failed"
+        ) from e
+
+    stream = None
+    try:
+        stream = conn.newStream(0)
+        vol.upload(stream, 0, size)
+        with open(source, "rb") as handle:
+            sent = 0
+            while True:
+                chunk = handle.read(1024 * 1024)
+                if not chunk:
+                    break
+                stream.send(chunk)
+                sent += len(chunk)
+                if size:
+                    session.progress(
+                        "upload", f"{name}: {sent // 1024 // 1024} MB", int(sent * 100 / size)
+                    )
+        stream.finish()
+    except Exception as e:
+        if stream is not None:
+            try:
+                stream.abort()
+            except libvirt.libvirtError:
+                pass
+        # The half-written volume is not something a retry could use.
+        try:
+            vol.delete(0)
+        except libvirt.libvirtError:
+            pass
+        raise MachineError(
+            f"Could not upload '{source}': {e}", EXIT_OPERATION, "upload_failed"
+        ) from e
+
+    return {"name": name, "path": _safe_get_volume_path(vol), "bytes": size}
+
+
+# --------------------------------------------------------------------------------------
+# Domains
+# --------------------------------------------------------------------------------------
+
+
+@machine_command("domain")
+def _domain_command(app, args, session):
+    """``domain list|state|address|start|shutdown|reboot|destroy|undefine <name>``."""
+    conn = _connection(app)
+    subcommand = args[0] if args else None
+    positional, options = _words(args[1:])
+
+    if subcommand == "list":
+        try:
+            domains = conn.listAllDomains(0)
+        except libvirt.libvirtError as e:
+            raise MachineError(
+                f"Could not list the domains: {e}", EXIT_OPERATION, "operation_failed"
+            ) from e
+        prefix = options.get("prefix") or ""
+        return {
+            "domains": [
+                {"name": domain.name(), "state": _domain_state(domain)}
+                for domain in domains
+                if domain.name().startswith(prefix)
+            ]
+        }
+
+    if not positional:
+        raise MachineError(f"domain {subcommand} needs a name.", EXIT_USAGE, "usage")
+    name = positional[0]
+    domain = _domain(conn, name)
+
+    if subcommand == "state":
+        return {"name": name, "state": _domain_state(domain)}
+
+    if subcommand == "address":
+        return _domain_address(domain, options)
+
+    actions = {
+        "start": lambda: domain.create(0),
+        "shutdown": lambda: domain.poweroff(),
+        "reboot": lambda: domain.reboot(0),
+        "destroy": lambda: domain.destroy(),
+        "undefine": lambda: domain.undefineFlags(libvirt.VIR_DOMAIN_UNDEFINE_MANAGED_SAVE),
+    }
+    action = actions.get(subcommand)
+    if action is None:
+        raise MachineError(f"Unknown domain subcommand '{subcommand}'.", EXIT_USAGE, "usage")
+    if subcommand == "undefine":
+        _refuse_if_running(domain, "undefine")
+    try:
+        action()
+    except libvirt.libvirtError as e:
+        raise MachineError(
+            f"Could not {subcommand} '{name}': {e}", EXIT_OPERATION, "operation_failed"
+        ) from e
+    if session is not None and subcommand in ("start", "shutdown", "reboot", "destroy"):
+        session.progress(subcommand, f"{subcommand} {name}")
+    return {
+        "name": name,
+        "state": _domain_state(domain) if subcommand != "undefine" else "undefined",
+    }
+
+
+def _refuse_if_running(domain, verb):
+    if domain.isActive():
+        raise MachineError(
+            f"The domain '{domain.name()}' is running; stop it before you {verb} it.",
+            EXIT_OPERATION,
+            "operation_failed",
+        )
+
+
+def _domain_address(domain, options):
+    """``domain address <name>``: what the hypervisor leased to this machine.
+
+    libvirt answers from the network's leases, which is where the address of a
+    machine that has not reported one is. A domain with no lease yet is not an
+    error: `ipv4` is simply null, and the caller decides what to wait for.
+    """
+    try:
+        interfaces = get_vm_network_ip(domain)
+    except libvirt.libvirtError as e:
+        raise MachineError(
+            f"Could not read the addresses of '{domain.name()}': {e}",
+            EXIT_OPERATION,
+            "operation_failed",
+        ) from e
+    leases = [
+        {
+            "mac": iface.get("mac"),
+            "ipv4": list(iface.get("ipv4") or []),
+            "ipv6": list(iface.get("ipv6") or []),
+        }
+        for iface in interfaces
+    ]
+    first = next((lease["ipv4"][0] for lease in leases if lease["ipv4"]), None)
+    return {
+        "name": domain.name(),
+        "state": _domain_state(domain),
+        # The address without its prefix length, which is what a caller connects to.
+        "ipv4": first.split("/")[0] if first else None,
+        "interfaces": leases,
+    }
+
+
+# --------------------------------------------------------------------------------------
+# Networks and the host
+# --------------------------------------------------------------------------------------
+
+
+@machine_command("network")
+def _network_command(app, args, _session):
+    """``network list``, ``network info <name>``."""
+    conn = _connection(app)
+    subcommand = args[0] if args else None
+    positional, _options = _words(args[1:])
+
+    if subcommand == "list":
+        try:
+            networks = conn.listAllNetworks(0)
+        except libvirt.libvirtError as e:
+            raise MachineError(
+                f"Could not list the networks: {e}", EXIT_OPERATION, "operation_failed"
+            ) from e
+        return {
+            "networks": [
+                {"name": network.name(), "state": "active" if network.isActive() else "inactive"}
+                for network in networks
+            ]
+        }
+
+    if subcommand == "info":
+        if not positional:
+            raise MachineError("network info needs a name.", EXIT_USAGE, "usage")
+        try:
+            network = conn.networkLookupByName(positional[0])
+        except libvirt.libvirtError as e:
+            raise _not_found(e, "network", positional[0]) from e
+        bridge = None
+        try:
+            root = ET.fromstring(network.XMLDesc(0))
+            element = root.find("bridge")
+            bridge = element.get("name") if element is not None else None
+        except (libvirt.libvirtError, ET.ParseError):
+            pass
+        return {
+            "name": network.name(),
+            "state": "active" if network.isActive() else "inactive",
+            "bridge": bridge,
+            "autostart": bool(network.getAutostart()),
+        }
+
+    raise MachineError(f"Unknown network subcommand '{subcommand}'.", EXIT_USAGE, "usage")
+
+
+@machine_command("host")
+def _host_command(app, args, _session):
+    """``host capabilities``, ``host resources``."""
+    conn = _connection(app)
+    subcommand = args[0] if args else None
+
+    if subcommand == "capabilities":
+        resources = _node_information(conn)
+        return {
+            "hostname": _hostname(conn),
+            # What can run here: every architecture the hypervisor has guests for.
+            "architectures": _guest_architectures(conn),
+            "host_cpus": resources["host_cpus"],
+            "memory_mb": resources["memory_mb"],
+            # UEFI is not assumed anywhere: a caller asks for it and reads this.
+            "uefi": _has_uefi_firmware(conn),
+        }
+
+    if subcommand == "resources":
+        return _node_information(conn)
+
+    raise MachineError(f"Unknown host subcommand '{subcommand}'.", EXIT_USAGE, "usage")
+
+
+def _hostname(conn):
+    try:
+        return conn.getHostname()
+    except libvirt.libvirtError:
+        return None
+
+
+def _node_information(conn):
+    """What the hypervisor has: its CPUs and its memory, in MB."""
+    resources = get_host_resources(conn)
+    return {
+        "host_cpus": resources.get("total_cpus"),
+        "memory_mb": (resources.get("total_memory") or 0) * 1024 or None,
+        # What a new machine could be given, which is what a caller decides with.
+        "available_mb": (resources.get("available_memory") or 0) * 1024 or None,
+    }
+
+
+def _guest_architectures(conn):
+    """The architectures this hypervisor can run, from its host capabilities."""
+    try:
+        root = ET.fromstring(conn.getCapabilities())
+    except (libvirt.libvirtError, ET.ParseError, TypeError):
+        return []
+    found = []
+    for guest in root.findall("guest"):
+        architecture = guest.find("arch")
+        if architecture is not None:
+            name = architecture.get("name")
+            if name and name not in found:
+                found.append(name)
+    return found
+
+
+def _has_uefi_firmware(conn):
+    """Whether a UEFI guest can boot here, which is what `firmware:uefi` asks."""
+    try:
+        root = ET.fromstring(conn.getCapabilities())
+    except (libvirt.libvirtError, ET.ParseError, TypeError):
+        return False
+    for guest in root.findall("guest"):
+        architecture = guest.find("arch")
+        if architecture is None:
+            continue
+        for loader in architecture.findall("loader"):
+            if (loader.get("type") or "pflash") == "pflash":
+                return True
+    return False

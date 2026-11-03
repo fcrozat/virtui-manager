@@ -1,6 +1,7 @@
 """
 Module for managing libvirt storage pools and volumes.
 """
+
 from __future__ import annotations
 
 import logging
@@ -505,10 +506,15 @@ def create_overlay_volume(
     name: str,
     backing_vol_path: str,
     backing_vol_format: str = "qcow2",
+    size_bytes: int | None = None,
 ) -> libvirt.virStorageVol:
     """
     Creates a qcow2 overlay volume backed by another volume (backing file).
     The new volume will record changes, while the backing file remains untouched.
+
+    `size_bytes` is the capacity of the new volume: a caller that wants a machine
+    with more disk than its base was built with says so, and the overlay grows to
+    it. Left alone, the overlay is the size of its backing volume.
     """
     if not _ensure_pool_active(pool):
         msg = f"Pool '{pool.name()}' is not active and could not be activated."
@@ -524,6 +530,8 @@ def create_overlay_volume(
         )
 
     _, capacity, _ = _safe_get_volume_info(backing_vol)
+    if size_bytes:
+        capacity = max(int(size_bytes), capacity)
 
     vol_xml = f"""
     <volume>

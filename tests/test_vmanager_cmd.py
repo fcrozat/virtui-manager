@@ -372,6 +372,88 @@ class TestDeployFromConfig(unittest.TestCase):
         self.assertEqual(ctx.exception.status, EXIT_CONFIG)
         self.assertEqual(ctx.exception.code, "config_invalid")
 
+    def _boot_cfg(self, **extra):
+        """A config that boots a disk the pool already has, with a cloud-init seed."""
+        cfg = {
+            "server": "local",
+            "vm_name": "sidekick-worker01",
+            "vm_type": "custom",
+            "memory_mb": 2048,
+            "vcpu": 2,
+            "disk_size_gb": 20,
+            "disk": {"volume": "sidekick-worker01"},
+            "seed": {"volume": "sidekick-worker01-seed"},
+            "metadata": {"mcp-sidekick": "instance", "instance": "worker01"},
+        }
+        cfg.update(extra)
+        return self._write_cfg(cfg)
+
+    def _pool_with(self, *names):
+        """A pool that answers for those volumes, and no others."""
+        import libvirt
+
+        pool = MagicMock()
+
+        def lookup(name):
+            if name not in names:
+                raise libvirt.libvirtError("No such volume")
+            volume = MagicMock()
+            volume.path.return_value = f"/var/lib/libvirt/images/{name}.qcow2"
+            volume.XMLDesc.return_value = (
+                "<volume><target><path>%s</path><format type='qcow2'/></target></volume>"
+                % volume.path.return_value
+            )
+            return volume
+
+        pool.storageVolLookupByName.side_effect = lookup
+        return pool
+
+    def test_deploy_from_a_boot_volume_skips_the_installer(self):
+        cfg_path = self._boot_cfg()
+        conn = MagicMock()
+        conn.lookupByName.side_effect = self._no_domain_error()
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+
+        conn.storagePoolLookupByName.return_value = self._pool_with(
+            "sidekick-worker01", "sidekick-worker01-seed"
+        )
+        with (
+            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov,
+            patch("sys.stdout", MagicMock()),
+        ):
+            self.cmd.deploy_from_config(cfg_path)
+
+        provisioner = mock_prov.return_value
+        provisioner.provision_vm.assert_not_called()
+        kwargs = provisioner.provision_existing_volume.call_args.kwargs
+        self.assertEqual(kwargs["disk_path"], "/var/lib/libvirt/images/sidekick-worker01.qcow2")
+        self.assertEqual(
+            kwargs["seed_path"], "/var/lib/libvirt/images/sidekick-worker01-seed.qcow2"
+        )
+        self.assertEqual(kwargs["metadata"]["instance"], "worker01")
+
+    def test_a_boot_volume_that_is_not_there_is_status_five(self):
+        from vmanager.machine_mode import EXIT_NOT_FOUND, MachineError, MachineSession
+
+        cfg_path = self._boot_cfg()
+        conn = MagicMock()
+        conn.lookupByName.side_effect = self._no_domain_error()
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+
+        conn.storagePoolLookupByName.return_value = self._pool_with()  # the disk is not in it
+        with (
+            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov,
+            patch("sys.stdout", MagicMock()),
+        ):
+            with self.assertRaises(MachineError) as raised:
+                self.cmd.deploy_from_config(cfg_path, session=MachineSession("deploy"))
+
+        self.assertEqual(raised.exception.status, EXIT_NOT_FOUND)
+        self.assertEqual(raised.exception.code, "not_found")
+        mock_prov.return_value.provision_existing_volume.assert_not_called()
+
     def test_deploy_in_machine_mode_reports_progress_as_it_happens(self):
         from vmanager.machine_mode import MachineSession
 

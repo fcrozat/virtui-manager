@@ -34,12 +34,14 @@ from .machine_mode import (
     EXIT_CONNECTION,
     EXIT_EXISTS,
     EXIT_OK,
+    EXIT_NOT_FOUND,
     EXIT_OPERATION,
     EXIT_USAGE,
     MachineError,
     MachineSession,
     run_command,
 )
+from . import machine_resources  # noqa: F401  registers the pool/volume/domain/host commands
 from .modals.input_modals import _sanitize_domain_name
 from .network_manager import (
     delete_network,
@@ -4255,6 +4257,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         list_storage_pools.cache_clear()
         list_networks.cache_clear()
 
+        # A machine that boots a disk it already has is a different deployment
+        # from an install, and shares nothing with one below this point.
+        if cfg["disk_volume"]:
+            return self._deploy_existing_volume(
+                cfg, conn, provisioner, vm_name, server_name, dryrun
+            )
+
         iso_url = self._resolve_iso_url(provisioner, cfg)
         if not iso_url:
             self._deploy_fail(
@@ -4356,6 +4365,149 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 print("SCC Registration: Yes")
         else:
             print("Automated Install: No")
+
+    def _deploy_existing_volume(self, cfg, conn, provisioner, vm_name, server_name, dryrun=False):
+        """Deploy the machine described by a `disk.volume` config: boot a disk, install nothing.
+
+        The disk is a volume in a pool libvirt already sees — the caller put it
+        there (`volume upload`, `volume create-overlay`) and this names it. When
+        the config also names a `backing_volume`, the disk is made as an overlay
+        of it first, so one config file describes a machine that starts from a
+        base and writes nowhere else.
+        """
+        from .deploy_config import resolve_vm_resources
+        from .storage_manager import _ensure_pool_active, create_overlay_volume
+
+        pool_name = cfg["storage_pool"]
+        disk_volume = cfg["disk_volume"]
+        try:
+            pool = conn.storagePoolLookupByName(pool_name)
+        except libvirt.libvirtError:
+            self._deploy_fail(
+                f"No storage pool '{pool_name}' on {server_name}.", EXIT_CONFIG, "pool_unavailable"
+            )
+            return
+        _ensure_pool_active(pool)
+
+        def volume_path(name):
+            """Where a volume of this pool is, and how it is formatted."""
+            try:
+                volume = pool.storageVolLookupByName(name)
+            except libvirt.libvirtError:
+                return None, None
+            return machine_resources.volume_path_and_format(volume)
+
+        disk_path, disk_format = volume_path(disk_volume)
+        if disk_path is None and cfg["backing_volume"]:
+            backing_path, _ = volume_path(cfg["backing_volume"])
+            if backing_path is None:
+                self._deploy_fail(
+                    f"No backing volume '{cfg['backing_volume']}' in '{pool_name}'.",
+                    EXIT_NOT_FOUND,
+                    "not_found",
+                )
+                return
+            try:
+                volume = create_overlay_volume(pool, disk_volume, backing_path)
+                disk_path, disk_format = machine_resources.volume_path_and_format(volume)
+            except Exception as e:
+                self._deploy_fail(
+                    f"Could not make '{disk_volume}' over '{cfg['backing_volume']}': {e}",
+                    EXIT_OPERATION,
+                    "operation_failed",
+                )
+                return
+        if disk_path is None:
+            self._deploy_fail(
+                f"No volume '{disk_volume}' in the pool '{pool_name}'.",
+                EXIT_NOT_FOUND,
+                "not_found",
+            )
+            return
+
+        seed_path = None
+        if cfg["seed_volume"]:
+            seed_path, _ = volume_path(cfg["seed_volume"])
+            if seed_path is None:
+                self._deploy_fail(
+                    f"No seed volume '{cfg['seed_volume']}' in '{pool_name}'.",
+                    EXIT_NOT_FOUND,
+                    "not_found",
+                )
+                return
+
+        _vm_type, memory_mb, vcpu, _disk_gb = resolve_vm_resources(cfg)
+        graphics = None if str(cfg["graphics"]).lower() in ("", "none") else cfg["graphics"]
+
+        if dryrun:
+            print("\n--- Summary of Actions (dry run) ---")
+            print(f"VM Name: {vm_name}")
+            print(f"Server: {server_name}")
+            print(f"Boots the volume: {disk_volume} ({disk_format or 'unknown format'})")
+            if cfg["backing_volume"]:
+                print(f"  as an overlay of: {cfg['backing_volume']}")
+            if cfg["seed_volume"]:
+                print(f"Seed CD-ROM: {cfg['seed_volume']}")
+            print(f"Memory: {memory_mb} MB, vCPU: {vcpu}")
+            print(f"Network: {cfg['network']}")
+            print(f"Boot Mode: {'UEFI' if cfg['boot_uefi'] else 'BIOS'}")
+            print(f"Boot order: {cfg['boot']}")
+
+        def cli_progress_callback(stage, percent=None):
+            if self.machine is not None:
+                self.machine.progress(stage, stage, percent)
+                return
+
+        try:
+            domain = provisioner.provision_existing_volume(
+                vm_name=vm_name,
+                disk_path=disk_path,
+                disk_format=disk_format or "qcow2",
+                seed_path=seed_path,
+                memory_mb=memory_mb,
+                vcpu_count=vcpu,
+                network_name=cfg["network"],
+                storage_pool_name=pool_name,
+                boot_uefi=cfg["boot_uefi"],
+                graphics=graphics,
+                boot_device=cfg["boot"],
+                metadata=cfg["metadata"],
+                start=cfg["start"],
+                progress_callback=cli_progress_callback,
+            )
+        except MachineError:
+            raise
+        except Exception as e:
+            self._deploy_fail(
+                f"Failed to boot the machine: {e}", EXIT_OPERATION, "provision_failed"
+            )
+            return
+
+        if not domain:
+            self._deploy_fail(
+                "Provisioning did not return a domain.", EXIT_OPERATION, "provision_failed"
+            )
+            return
+
+        print(f"\nSuccessfully booted VM '{vm_name}'.")
+        result = _deploy_result(
+            vm_name,
+            server_name,
+            pool_name,
+            cfg["network"],
+            cfg["boot_uefi"],
+            graphics or "none",
+            memory_mb,
+            vcpu,
+            None,
+            None,
+            dryrun=dryrun,
+            running=bool(domain.isActive()),
+        )
+        result["volume"] = disk_volume
+        if cfg["seed_volume"]:
+            result["seed"] = cfg["seed_volume"]
+        return result
 
     def _resolve_iso_url(self, provisioner, cfg):
         """Resolve the ISO url/path from the config's ``iso`` block.
