@@ -29,6 +29,17 @@ from .config import get_log_path, load_config
 from .constants import AppInfo, ServerPalette
 from .libvirt_error_handler import register_error_handler
 from .libvirt_utils import get_host_resources, get_network_info
+from .machine_mode import (
+    EXIT_CONFIG,
+    EXIT_CONNECTION,
+    EXIT_EXISTS,
+    EXIT_OK,
+    EXIT_OPERATION,
+    EXIT_USAGE,
+    MachineError,
+    MachineSession,
+    run_command,
+)
 from .modals.input_modals import _sanitize_domain_name
 from .network_manager import (
     delete_network,
@@ -139,6 +150,12 @@ class VManagerCMD(cmd.Cmd):
     def __init__(self, vm_service=None):
         super().__init__()
         self.yes_mode = False
+        # The uri a scripted caller named with -u/--uri, None when it did not.
+        # Set before preloop, so it replaces the configured autoconnect.
+        self.default_uri = None
+        # The MachineSession of a --machine run, None for a human. Commands
+        # that can be driven this way answer through it instead of printing.
+        self.machine = None
 
         # Setup logging
         try:
@@ -240,7 +257,19 @@ class VManagerCMD(cmd.Cmd):
         self._perform_autoconnect()
 
     def _perform_autoconnect(self):
-        """Auto-connect to servers that have autoconnect enabled."""
+        """Connect to the uri given on the command line, or to the configured ones.
+
+        ``-u/--uri`` is what a scripted caller uses to say which hypervisor it
+        means. It then connects to that one only: a run that named its
+        hypervisor should not also open the servers of the developer's
+        configuration, whose state would decide what the command sees.
+        """
+        if self.default_uri:
+            server_name = self._connect_one(self.default_uri)
+            if server_name:
+                self.selected_vms[server_name] = []
+            return
+
         for server in self.servers:
             if server.get("autoconnect", False):
                 try:
@@ -4148,35 +4177,56 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         except Exception as e:
             print(f"\nFailed to provision VM: {e}")
 
-    def deploy_from_config(self, path, dryrun=False):
+    def _deploy_fail(self, message, status, code):
+        """Report a deployment failure: prose for a human, MachineError for --machine.
+
+        A deployment that did not happen has to leave the process with a
+        status saying so (``machine_mode``), which printing alone cannot do.
+        """
+        if self.machine is not None:
+            raise MachineError(message, status=status, code=code)
+        print(message)
+
+    def deploy_from_config(self, path, dryrun=False, session=None):
         """Deploy a single VM from a JSON config file (see ``prepare_json``).
 
         Non-interactive counterpart of ``installvm``: the JSON describes every
         choice, so no prompts are shown. Reuses the same
         ``VMProvisioner.provision_vm`` path as the interactive command.
+
+        Returns what was deployed (or, with ``dryrun``, what would be), so a
+        machine caller gets the result instead of reading the prose. Pass
+        ``session`` to run under ``--machine``: failures then raise
+        :class:`MachineError` and progress is reported as it happens.
         """
         from .deploy_config import DeployConfigError, load_deploy_config, resolve_vm_resources
+
+        self.machine = session
 
         try:
             cfg = load_deploy_config(path)
         except DeployConfigError as e:
-            print(f"Config error: {e}")
+            self._deploy_fail(f"Config error: {e}", EXIT_CONFIG, "config_invalid")
             return
 
         vm_name = cfg["vm_name"]
         try:
             vm_name, _was_modified = _sanitize_domain_name(vm_name)
         except ValueError as e:
-            print(f"Invalid VM name: {e}")
+            self._deploy_fail(f"Invalid VM name: {e}", EXIT_CONFIG, "config_invalid")
             return
         if not vm_name:
-            print("VM name cannot be empty.")
+            self._deploy_fail("VM name cannot be empty.", EXIT_CONFIG, "config_invalid")
             return
 
-        server = cfg["server"]
+        # A caller that named its hypervisor with -u/--uri means that one, even
+        # though the deployment file names a server too.
+        server = self.default_uri or cfg["server"]
         server_name = self._connect_one(server)
         if not server_name:
-            print(f"Could not connect to server '{server}'.")
+            self._deploy_fail(
+                f"Could not connect to server '{server}'.", EXIT_CONNECTION, "connection_failed"
+            )
             return
         conn = self.active_connections[server_name]
         provisioner = VMProvisioner(conn)
@@ -4184,16 +4234,22 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         # Fail fast before creating any artifacts
         try:
             conn.lookupByName(vm_name)
-            print(f"VM '{vm_name}' already exists.")
+            self._deploy_fail(f"VM '{vm_name}' already exists.", EXIT_EXISTS, "already_exists")
             return
         except libvirt.libvirtError as e:
             if e.get_error_code() != libvirt.VIR_ERR_NO_DOMAIN:
-                print(f"Error checking VM name: {e}")
+                self._deploy_fail(
+                    f"Error checking VM name: {e}", EXIT_OPERATION, "operation_failed"
+                )
                 return
 
         # Ensure default pool and network exist and are active
         if not ensure_default_pool(conn):
-            print("No storage pool available and could not create default pool.")
+            self._deploy_fail(
+                "No storage pool available and could not create default pool.",
+                EXIT_OPERATION,
+                "pool_unavailable",
+            )
             return
         ensure_default_network(conn)
         list_storage_pools.cache_clear()
@@ -4201,7 +4257,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
         iso_url = self._resolve_iso_url(provisioner, cfg)
         if not iso_url:
-            print("Could not resolve ISO from config.")
+            self._deploy_fail(
+                "Could not resolve ISO from config.", EXIT_CONFIG, "iso_unresolvable"
+            )
             return
 
         vm_type, memory_mb, vcpu, disk_size_gb = resolve_vm_resources(cfg)
@@ -4219,9 +4277,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 cfg, vm_name, server_name, iso_url, network, storage_pool,
                 boot_uefi, graphics_type, memory_mb, vcpu, disk_size_gb, automation_config,
             )
-            return
+            return _deploy_result(
+                vm_name, server_name, storage_pool, network, boot_uefi, graphics_type,
+                memory_mb, vcpu, disk_size_gb, automation_config, dryrun=True,
+            )
 
         def cli_progress_callback(stage, percent):
+            if self.machine is not None:
+                self.machine.progress(stage, stage, percent)
+                return
             columns, _ = shutil.get_terminal_size()
             sys.stdout.write(f"\r[{percent}%] {stage}".ljust(columns - 1))
             sys.stdout.flush()
@@ -4254,10 +4318,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 elif cfg.get("start", True):
                     start_vm(domain)
                     print(f"VM '{vm_name}' started.")
-            else:
-                print("\nProvisioning did not return a domain.")
+                return _deploy_result(
+                    vm_name, server_name, storage_pool, network, boot_uefi, graphics_type,
+                    memory_mb, vcpu, disk_size_gb, automation_config, running=domain.isActive(),
+                )
+            self._deploy_fail(
+                "Provisioning did not return a domain.", EXIT_OPERATION, "provision_failed"
+            )
+        except MachineError:
+            # Already a failure with its own status; do not re-wrap it.
+            raise
         except Exception as e:
-            print(f"\nFailed to provision VM: {e}")
+            self._deploy_fail(f"Failed to provision VM: {e}", EXIT_OPERATION, "provision_failed")
 
     def _print_deploy_summary(self, cfg, vm_name, server_name, iso_url,
                               network, storage_pool, boot_uefi, graphics_type,
@@ -4910,6 +4982,27 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         return [n for n in sorted(names) if n.startswith(text)]
 
 
+def _deploy_result(vm_name, server_name, storage_pool, network, boot_uefi, graphics_type,
+                   memory_mb, vcpu, disk_size_gb, automation_config, dryrun=False, running=False):
+    """What a deployment made, as the ``data`` of a ``--machine`` answer."""
+    result = {
+        "domain": vm_name,
+        "server": server_name,
+        "storage_pool": storage_pool,
+        "network": network,
+        "firmware": "uefi" if boot_uefi else "bios",
+        "graphics": graphics_type,
+        "memory_mb": memory_mb,
+        "vcpu": vcpu,
+        "automated_install": bool(automation_config),
+        "dryrun": dryrun,
+        "running": running,
+    }
+    if disk_size_gb:
+        result["disk_gb"] = disk_size_gb
+    return result
+
+
 def main():
     """Entry point for Virtui Manager command-line interface."""
     import argparse
@@ -4932,9 +5025,33 @@ def main():
         help="Deploy a single VM from a JSON config file (see the 'prepare_json' command)",
     )
     parser.add_argument(
+        "-u",
+        "--uri",
+        metavar="URI",
+        help=(
+            "Connect to this libvirt uri (qemu:///system, qemu+ssh://user@host/system) "
+            "and to nothing else, instead of the servers marked autoconnect in the "
+            "configuration"
+        ),
+    )
+    parser.add_argument(
         "--dryrun",
         action="store_true",
         help="With --json: show a summary of the deployment without provisioning",
+    )
+    parser.add_argument(
+        "--machine",
+        action="store_true",
+        help=(
+            "With -c or --json: answer with one JSON object on stdout, send prose to stderr, "
+            "report progress as it happens, and exit with a status that says what happened"
+        ),
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {AppInfo.version}",
+        help="Show the version and exit",
     )
     args = parser.parse_args()
 
@@ -4943,24 +5060,68 @@ def main():
         parser.print_help()
         return
 
+    if args.machine and not (args.command or args.json):
+        print("Error: --machine needs -c/--command or -C/--json.", file=sys.stderr)
+        return EXIT_USAGE
+
+    if args.uri and not (args.command or args.json):
+        print("Error: --uri needs -c/--command or -C/--json.", file=sys.stderr)
+        return EXIT_USAGE
+
+    # Machine-readable mode sends prose to stderr from the start: setting up
+    # the command shell prints a terminal title, and stdout is for the answer.
+    human_stdout = sys.stdout
+    if args.machine:
+        sys.stdout = sys.stderr
+
     cmd_app = VManagerCMD()
     cmd_app.yes_mode = bool(args.command)
+    cmd_app.default_uri = args.uri
 
-    # Config-driven deployment (non-interactive): load JSON, connect, provision.
-    if args.json:
-        cmd_app.deploy_from_config(args.json, dryrun=args.dryrun)
+    if not args.machine:
+        # Config-driven deployment (non-interactive): load JSON, connect, provision.
+        if args.json:
+            deployed = cmd_app.deploy_from_config(args.json, dryrun=args.dryrun)
+            # A deployment that did not happen fails, instead of printing its
+            # reason and exiting 0.
+            return EXIT_OK if deployed is not None else EXIT_OPERATION
+
+        if args.command:
+            cmd_app.preloop()
+            cmd_app.onecmd(args.command)
+            return
+
+        try:
+            cmd_app.cmdloop()
+        except KeyboardInterrupt:
+            print("\nKeyboardInterrupt caught. Use 'quit' to exit.")
+            cmd_app.intro = ""
         return
 
-    if args.command:
-        cmd_app.preloop()
-        cmd_app.onecmd(args.command)
-        return
-
+    # From here on, everything the commands print is a log line; stdout
+    # carries only the JSON object the caller is waiting for.
+    session = MachineSession("deploy" if args.json else args.command)
     try:
-        cmd_app.cmdloop()
+        if args.json:
+            status = session.succeed(
+                cmd_app.deploy_from_config(args.json, dryrun=args.dryrun, session=session)
+            )
+        else:
+            cmd_app.preloop()
+            if args.uri and not cmd_app.active_connections:
+                raise MachineError(
+                    f"Could not connect to {cmd_app._sanitize_message(args.uri)}.",
+                    EXIT_CONNECTION,
+                    "connection_failed",
+                )
+            status = run_command(cmd_app, args.command, session)
     except KeyboardInterrupt:
-        print("\nKeyboardInterrupt caught. Use 'quit' to exit.")
-        cmd_app.intro = ""
+        status = session.fail(MachineError("Interrupted.", EXIT_OPERATION, "interrupted"))
+    except Exception as e:  # MachineError, or whatever a command let escape
+        status = session.fail(e)
+    finally:
+        sys.stdout = human_stdout
+    return status
 
 
 if __name__ == "__main__":

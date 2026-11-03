@@ -378,6 +378,90 @@ web01.json               web01              server           789 B  2026-11-03 1
 }
 ```
 
+## Machine-Readable Output
+
+`--machine` turns `vmc` into something a program can drive. Reading the prose
+of `vmc -c "deploy"` is not a contract, and neither is an exit status of 0 for
+a deployment that failed: in machine mode one JSON object goes to stdout,
+everything a command prints goes to stderr as a log line, and the exit status
+says what happened.
+
+```bash
+# Deploy from a JSON file and get the result as JSON
+$ vmc --machine --json ~/deploy/web01.json
+{"ok": true, "command": "deploy", "data": {"domain": "web01", "server": "localhost", ...}}
+
+# Ask what this vmc is, and which commands it answers to
+$ vmc --machine -c "machine info"
+{"ok": true, "command": "machine info", "data": {"protocol": 1, "name": "virtui-manager", "version": "3.4.0", "commands": ["machine"]}}
+
+# A deployment can be tried out the same way
+$ vmc --machine --dryrun --json ~/deploy/web01.json
+{"ok": true, "command": "deploy", "data": {"domain": "web01", "dryrun": true, ...}}
+```
+
+*   stdout carries **only** the JSON objects below — no progress bar, no
+    connection chatter, no libvirt noise. Those go to stderr, and are still
+    written to the log file.
+*   Messages and data are sanitized the same way as the log: a password or the
+    credentials in a hypervisor URI never reach the answer.
+*   `--machine` needs `-c/--command` or `--json`; without one it is a usage
+    error (status 2).
+
+### The answer
+
+The last object on stdout is the result of the call:
+
+```json
+{"ok": true, "command": "deploy", "data": {"domain": "web01", "storage_pool": "default", "firmware": "uefi", "running": true}}
+```
+
+```json
+{"ok": false, "command": "deploy", "code": "already_exists", "message": "VM 'web01' already exists."}
+```
+
+Before it, a long command may report what it is doing, one event per line:
+
+```json
+{"event": "progress", "stage": "downloading", "message": "Downloading ISO", "percent": 45}
+```
+
+### Choosing the hypervisor
+
+`-u/--uri` says which hypervisor the call means, and connects to that one
+only — the servers marked `autoconnect` in the configuration are left alone, so
+what a command sees does not depend on the local configuration:
+
+```bash
+$ vmc -u qemu:///system --machine -c "machine info"
+$ vmc -u qemu+ssh://root@h1/system --machine --json ~/deploy/web01.json
+```
+
+With `--json`, the uri replaces the `server` field of the deployment file, so
+one file can be deployed anywhere. Without `-u`, `--json` connects to the
+`server` of the file, and `-c` to the configured servers as before. A `-u` the
+hypervisor refuses is status 4. Like every other message, the uri is sanitized:
+credentials it carries are not repeated back.
+
+### Exit statuses
+
+| Status | Meaning |
+| --- | --- |
+| 0 | The call succeeded. |
+| 2 | Unknown command, or bad arguments. |
+| 3 | A deployment file is missing, malformed or invalid. |
+| 4 | The hypervisor cannot be reached. |
+| 5 | No such domain, volume, pool or network. |
+| 6 | The name is taken. |
+| 7 | The hypervisor refused, or the operation failed. |
+| 8 | A wait timed out. |
+| 9 | The command has no machine-readable result in this version of vmc. |
+
+Status 9 is how a caller tells a command that does not exist *here* from a
+command that ran and failed: a command gains a machine-readable result one at
+a time, and until then it is reported as unsupported rather than as a success
+with an empty payload. `machine info` lists the commands this vmc answers to.
+
 ## Advanced Tools
 
 *   **`virsh [server]`**: Launches an interactive `virsh` shell connected to the selected server. If multiple servers are connected and no argument is provided, you will be prompted to choose.

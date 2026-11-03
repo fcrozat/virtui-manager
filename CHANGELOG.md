@@ -4,6 +4,24 @@ All notable changes to Virtui Manager are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `vmc --machine`, a machine-readable mode for `-c` and `--json`: one JSON
+  object on stdout, command output and progress as log lines on stderr, and an
+  exit status per failure (see the "Machine-Readable Output" section of the CLI
+  manual). Written so that a program can drive `vmc` without parsing prose.
+- `machine info` command, reporting the protocol version, the version of
+  virtui-manager and the commands it answers to in machine mode.
+- `vmc --version`.
+
+### Changed
+- `vmc --json` exits non-zero when the deployment did not happen, instead of
+  printing the reason and exiting 0. With `--machine`, every failure leaves one
+  of the documented statuses (see the CLI manual).
+- `deploy_from_config` returns what it deployed (or, with `--dryrun`, what it
+  would deploy).
+
 ## [3.3.9]
 
 ### Changed

@@ -297,7 +297,7 @@ class TestDeployFromConfig(unittest.TestCase):
             patch("vmanager.vmanager_cmd.list_storage_pools"), \
             patch("vmanager.vmanager_cmd.list_networks"), \
             redirect_stdout(io.StringIO()) as buf:
-            self.cmd.deploy_from_config(cfg_path, dryrun=True)
+            result = self.cmd.deploy_from_config(cfg_path, dryrun=True)
 
         out = buf.getvalue()
         self.assertIn("Summary of Actions", out)
@@ -307,6 +307,11 @@ class TestDeployFromConfig(unittest.TestCase):
         self.assertIn("SCC Registration: Yes", out)
         # provision_vm must NOT be called in dry-run
         mock_prov.return_value.provision_vm.assert_not_called()
+        # and the caller can read the result instead of the prose
+        self.assertEqual(result["domain"], "web01")
+        self.assertEqual(result["storage_pool"], "default")
+        self.assertTrue(result["dryrun"])
+        self.assertTrue(result["automated_install"])
 
     def test_deploy_from_config_vm_exists(self):
         import libvirt
@@ -330,6 +335,137 @@ class TestDeployFromConfig(unittest.TestCase):
 
         self.assertIn("already exists", buf.getvalue())
         mock_prov.return_value.provision_vm.assert_not_called()
+
+    def test_deploy_in_machine_mode_fails_with_a_status(self):
+        """A deploy that did not happen has to fail, not print and exit 0."""
+        from vmanager.machine_mode import EXIT_EXISTS, MachineError, MachineSession
+
+        cfg_path = self._write_cfg(
+            {
+                "server": "local",
+                "vm_name": "web01",
+                "vm_type": "server",
+                "iso": {"source": "url", "url": "https://x/y.iso"},
+            }
+        )
+        conn = MagicMock()
+        conn.lookupByName.return_value = MagicMock()  # VM exists
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+
+        with patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov, \
+            patch("sys.stdout", MagicMock()):
+            with self.assertRaises(MachineError) as ctx:
+                self.cmd.deploy_from_config(cfg_path, session=MachineSession("deploy"))
+
+        self.assertEqual(ctx.exception.status, EXIT_EXISTS)
+        self.assertEqual(ctx.exception.code, "already_exists")
+        mock_prov.return_value.provision_vm.assert_not_called()
+
+    def test_deploy_in_machine_mode_reports_a_bad_config_file(self):
+        from vmanager.machine_mode import EXIT_CONFIG, MachineError, MachineSession
+
+        with patch("sys.stdout", MagicMock()):
+            with self.assertRaises(MachineError) as ctx:
+                self.cmd.deploy_from_config("/no/such/deploy.json", session=MachineSession("deploy"))
+
+        self.assertEqual(ctx.exception.status, EXIT_CONFIG)
+        self.assertEqual(ctx.exception.code, "config_invalid")
+
+    def test_deploy_in_machine_mode_reports_progress_as_it_happens(self):
+        from vmanager.machine_mode import MachineSession
+
+        cfg_path = self._write_cfg(
+            {
+                "server": "local",
+                "vm_name": "web01",
+                "vm_type": "server",
+                "iso": {"source": "url", "url": "https://x/y.iso"},
+            }
+        )
+        conn = MagicMock()
+        conn.lookupByName.side_effect = self._no_domain_error()
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+
+        def provision(**kwargs):
+            kwargs["progress_callback"]("downloading", 45)
+            domain = MagicMock()
+            domain.isActive.return_value = True
+            return domain
+
+        stream = io.StringIO()
+        with patch("vmanager.vmanager_cmd.ensure_default_pool", return_value=True), \
+            patch("vmanager.vmanager_cmd.ensure_default_network"), \
+            patch("vmanager.vmanager_cmd.list_storage_pools"), \
+            patch("vmanager.vmanager_cmd.list_networks"), \
+            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov, \
+            patch("sys.stdout", MagicMock()), redirect_stdout(io.StringIO()):
+            mock_prov.return_value.provision_vm.side_effect = provision
+            result = self.cmd.deploy_from_config(
+                cfg_path, session=MachineSession("deploy", stdout=stream)
+            )
+
+        self.assertEqual(
+            json.loads(stream.getvalue()),
+            {"event": "progress", "message": "downloading", "percent": 45, "stage": "downloading"},
+        )
+        self.assertTrue(result["running"])
+
+    def test_deploy_in_machine_mode_reports_a_provisioning_failure(self):
+        from vmanager.machine_mode import EXIT_OPERATION, MachineError, MachineSession
+
+        cfg_path = self._write_cfg(
+            {
+                "server": "local",
+                "vm_name": "web01",
+                "vm_type": "server",
+                "iso": {"source": "url", "url": "https://x/y.iso"},
+            }
+        )
+        conn = MagicMock()
+        conn.lookupByName.side_effect = self._no_domain_error()
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+
+        with patch("vmanager.vmanager_cmd.ensure_default_pool", return_value=True), \
+            patch("vmanager.vmanager_cmd.ensure_default_network"), \
+            patch("vmanager.vmanager_cmd.list_storage_pools"), \
+            patch("vmanager.vmanager_cmd.list_networks"), \
+            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov, \
+            patch("sys.stdout", MagicMock()), redirect_stdout(io.StringIO()):
+            mock_prov.return_value.provision_vm.side_effect = RuntimeError("no space left")
+            with self.assertRaises(MachineError) as ctx:
+                self.cmd.deploy_from_config(cfg_path, session=MachineSession("deploy"))
+
+        self.assertEqual(ctx.exception.status, EXIT_OPERATION)
+        self.assertEqual(ctx.exception.code, "provision_failed")
+        self.assertIn("no space left", str(ctx.exception))
+
+    def test_deploy_without_a_session_keeps_printing(self):
+        """A human still gets prose: nothing raises when nobody asked for JSON."""
+        conn = MagicMock()
+        conn.lookupByName.return_value = MagicMock()  # VM exists
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+        cfg_path = self._write_cfg(
+            {
+                "server": "local",
+                "vm_name": "web01",
+                "vm_type": "server",
+                "iso": {"source": "url", "url": "https://x/y.iso"},
+            }
+        )
+
+        with patch("vmanager.vmanager_cmd.VMProvisioner"), redirect_stdout(io.StringIO()) as buf:
+            self.assertIsNone(self.cmd.deploy_from_config(cfg_path))
+
+        self.assertIn("already exists", buf.getvalue())
+
+    def test_deploy_without_a_session_gives_no_result_when_it_failed(self):
+        """The exit status of `vmc --json` comes from this return value."""
+        with patch("sys.stdout", MagicMock()), redirect_stdout(io.StringIO()):
+            self.assertIsNone(self.cmd.deploy_from_config("/no/such/deploy.json"))
 
     def test_prepare_json_init_writes_skeleton(self):
         import json
@@ -517,6 +653,77 @@ class TestDeployFromConfig(unittest.TestCase):
         self.assertEqual(result, {})
         self.cmd._get_input.assert_not_called()
         self.cmd._get_password.assert_not_called()
+
+
+class TestUriOption(unittest.TestCase):
+    """Tests for ``vmc -u/--uri``, the hypervisor a scripted caller names."""
+
+    @patch("vmanager.vmanager_cmd.load_config")
+    @patch("vmanager.vmanager_cmd.get_log_path")
+    @patch("vmanager.vmanager_cmd.CLILogger")
+    def setUp(self, mock_logger, mock_log_path, mock_load_config):
+        mock_load_config.return_value = {
+            "servers": [
+                {"name": "local", "uri": "qemu:///system", "autoconnect": True},
+                {"name": "other", "uri": "qemu+ssh://user@other/system", "autoconnect": True},
+            ]
+        }
+        mock_log_path.return_value = "/tmp/vmanager_test.log"
+        self.mock_vm_service = MagicMock()
+        with patch("sys.stdout", MagicMock()):
+            self.cmd = VManagerCMD(vm_service=self.mock_vm_service)
+
+    def test_without_uri_the_configured_servers_connect(self):
+        self.mock_vm_service.connect.return_value = MagicMock()
+        with patch("sys.stdout", MagicMock()):
+            self.cmd._perform_autoconnect()
+        self.assertEqual(
+            self.mock_vm_service.connect.call_count, 2, "both autoconnect servers"
+        )
+
+    def test_uri_connects_to_that_hypervisor_only(self):
+        self.mock_vm_service.connect.return_value = MagicMock()
+        self.cmd.default_uri = "qemu+ssh://root@h1/system"
+        with patch("sys.stdout", MagicMock()):
+            self.cmd._perform_autoconnect()
+        self.mock_vm_service.connect.assert_called_once_with("qemu+ssh://root@h1/system")
+        self.assertIn("h1", self.cmd.active_connections)
+        self.assertIn("h1", self.cmd.selected_vms)
+
+    def test_uri_replaces_the_server_of_a_deployment_file(self):
+        """``-u`` wins over the file, so one file can go to any hypervisor."""
+        calls = []
+
+        def stop(server):
+            calls.append(server)
+            raise RuntimeError("enough of the deployment")
+
+        self.cmd._connect_one = stop
+        cfg = self._write_cfg(
+            {
+                "server": "local",
+                "vm_name": "v",
+                "vm_type": "custom",
+                "memory_mb": 2048,
+                "vcpu": 2,
+                "disk_size_gb": 20,
+                "iso": {"source": "url", "url": "http://h/SLE-15-SP1.iso"},
+            }
+        )
+        self.cmd.default_uri = "qemu:///system"
+        with patch("sys.stdout", MagicMock()), self.assertRaises(RuntimeError):
+            self.cmd.deploy_from_config(cfg)
+        self.assertEqual(calls, ["qemu:///system"])
+
+    def _write_cfg(self, obj):
+        import json
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(obj, f)
+            path = f.name
+        self.addCleanup(os.unlink, path)
+        return path
 
 
 class TestWriteJson(unittest.TestCase):
