@@ -539,6 +539,22 @@ class TestDeployFromConfig(unittest.TestCase):
         self.assertEqual(self.install_request["seed_path"], "/var/lib/libvirt/images/seed-a.qcow2")
         self.assertEqual(result["seed"], "seed-a")
 
+    def test_a_dry_run_of_an_install_names_the_seed_it_would_attach(self):
+        """A dry run answers what the deploy would answer, seed and all.
+
+        The lines that put the seed in the answer sat after the `return` that
+        builds it, so a caller asking "what would happen" read back a machine
+        with no seed attached and saw nothing wrong with the file.
+        """
+        result = self._deploy_an_install(
+            self._install_cfg(seed={"volume": "seed-a"}),
+            pool=self._pool_with("seed-a"),
+            dryrun=True,
+        )
+        self.assertTrue(result["dryrun"])
+        self.assertEqual(result["seed"], "seed-a")
+        self.assertIsNone(self.install_request, "a dry run must not provision")
+
     def test_an_install_with_no_seed_has_nothing_to_attach(self):
         result = self._deploy_an_install(self._install_cfg(), pool=self._pool_with())
         self.assertIsNone(self.install_request["seed_path"])
@@ -749,7 +765,7 @@ class TestDeployFromConfig(unittest.TestCase):
         domain.isActive.return_value = 1
         return domain
 
-    def _deploy_an_install(self, cfg_path, served=None, pool=None, session=None):
+    def _deploy_an_install(self, cfg_path, served=None, pool=None, session=None, dryrun=False):
         """Run an install deploy past the point where the answer is built.
 
         `served` is the auto-install profile the provisioner says it served, or
@@ -784,7 +800,7 @@ class TestDeployFromConfig(unittest.TestCase):
             redirect_stdout(io.StringIO()),
         ):
             mock_prov.return_value.provision_vm.side_effect = provision
-            return self.cmd.deploy_from_config(cfg_path, session=session)
+            return self.cmd.deploy_from_config(cfg_path, dryrun=dryrun, session=session)
 
     def _deploy_a_boot_volume(self, cfg_path):
         """Run a boot-a-volume deploy past the point where the answer is built."""

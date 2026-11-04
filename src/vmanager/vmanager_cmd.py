@@ -4323,7 +4323,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 disk_size_gb,
                 automation_config,
             )
-            return _deploy_result(
+            result = _deploy_result(
                 vm_name,
                 server_name,
                 storage_pool,
