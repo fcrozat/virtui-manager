@@ -419,7 +419,13 @@ the storage pool — one that `volume upload` put there, or one that
 An `iso` and a `disk.volume` are two ways of making a machine and cannot both
 be in one file; `autoinstall` needs an `iso`, since there is nothing to answer
 for a disk that is already installed. This path asks for no screen: pass
-`graphics` (`vnc` or `spice`) when you want one.
+`graphics` (`vnc` or `spice`) when you want one. Any other word there is a bad
+deploy file (status 3) rather than a device libvirt will refuse later; `null` is
+the way to ask for no screen.
+
+What goes into the machine's XML is escaped on the way in — pool and volume
+paths, the network's name, the firmware paths — so a pool directory holding a
+`&` or a quote boots a machine instead of producing XML that does not parse.
 
 The volumes have to be in the pool before the deploy runs, and libvirt has to
 see them — `volume upload` and `volume create-overlay` do that, or the files

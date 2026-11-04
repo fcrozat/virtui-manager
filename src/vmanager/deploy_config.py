@@ -45,6 +45,11 @@ ISO_SOURCES = ("url", "pool", "cached", "repository")
 # attached (install media, or a seed a built machine is configured from).
 BOOT_DEVICES = ("disk", "cdrom")
 
+# The screens the tool can give a machine. Anything else in `graphics` is a typo
+# that would reach libvirt as a device it refuses, so it is answered here, as the
+# bad deploy file it is. `null` asks for no screen at all.
+GRAPHICS_TYPES = ("vnc", "spice")
+
 # ``vm_type`` may be one of the VMType profile names (lowercase) or this value,
 # which lets the user supply memory/disk/vCPU manually instead of a profile.
 CUSTOM_VM_TYPE = "custom"
@@ -130,7 +135,13 @@ def _validate(cfg: Dict[str, Any]) -> None:
 
     # --- boot / graphics / network / pool defaults ---
     cfg["boot_uefi"] = bool(cfg.get("boot_uefi", True))
-    cfg["graphics"] = cfg.get("graphics", "spice")
+    graphics = cfg.get("graphics", "spice")
+    if graphics is not None and graphics not in GRAPHICS_TYPES:
+        raise DeployConfigError(
+            f"'graphics' must be one of {', '.join(GRAPHICS_TYPES)}, "
+            f"or null for no screen (got '{graphics}')"
+        )
+    cfg["graphics"] = graphics
     cfg["network"] = cfg.get("network", "default")
     cfg["storage_pool"] = cfg.get("storage_pool", "default")
     cfg["start"] = bool(cfg.get("start", True))

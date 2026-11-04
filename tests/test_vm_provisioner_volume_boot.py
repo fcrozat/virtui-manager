@@ -126,6 +126,28 @@ class VolumeBootXmlTest(unittest.TestCase):
         self.assertEqual(xml.find("os/loader").text, "/usr/share/OVMF/code.fd")
         self.assertEqual(xml.find("os/nvram").text, "/pool/nvram.fd")
 
+    def test_a_disk_path_holding_markup_still_boots(self):
+        """A pool directory is allowed a `&` or a quote; the XML stays one value."""
+        hostile = "/var/lib/libvirt/images/we&ird's/disk.qcow2"
+        xml = self.boot(disk_path=hostile)
+        self.assertEqual(xml.find("devices/disk/source").get("file"), hostile)
+
+    def test_a_seed_and_a_network_named_with_markup_are_still_one_value(self):
+        seed = "/pool/it's a & thing.iso"
+        xml = self.boot(seed_path=seed, network_name="lab&office")
+        self.assertEqual(xml.find("devices/interface/source").get("network"), "lab&office")
+        cdrom = [d for d in xml.find("devices") if d.get("device") == "cdrom"][0]
+        self.assertEqual(cdrom.find("source").get("file"), seed)
+
+    def test_a_firmware_path_holding_markup_is_still_one_value(self):
+        loader, nvram = "/var/lib/libvirt&ox/OVMF.fd", "/var/lib/libvirt&ox/nvram.fd"
+        with patch.object(
+            self.provisioner, "_setup_uefi_nvram", return_value=(loader, nvram)
+        ):
+            xml = self.boot(boot_uefi=True)
+        self.assertEqual(xml.find("os/loader").text, loader)
+        self.assertEqual(xml.find("os/nvram").text, nvram)
+
     def test_the_metadata_of_the_caller_is_kept_in_the_machine(self):
         xml = self.boot(metadata={"owner": "mcp-sidekick", "instance": "worker01"})
         # The namespace on `properties` covers its children, as any namespace

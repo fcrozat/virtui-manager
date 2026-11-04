@@ -26,6 +26,7 @@ from email.utils import parsedate_to_datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from xml.sax.saxutils import escape
 
 import libvirt
 import yaml
@@ -51,6 +52,19 @@ from .vm_actions import delete_boot_files, get_vm_boot_files, strip_installation
 # ours, so another tool's metadata sits beside it untouched.
 METADATA_NS = "https://virtui-manager/metadata/1"
 METADATA_ELEMENT = "properties"
+
+
+def xml_value(value) -> str:
+    """A path, name or setting made safe to put into domain XML.
+
+    These arrive from a deploy file and from the hypervisor: a pool directory may
+    hold a `&`, a network may be written with a quote, a download URL asked for by
+    an installer line may carry both. Escaped, libvirt is handed one value; left
+    alone, it is handed a document that does not parse and a failure that names the
+    hypervisor rather than the input. Both quote marks are escaped, so the result
+    is safe between tags and inside the single quotes this XML is written with.
+    """
+    return escape(str(value), {'"': "&quot;", "'": "&apos;"})
 
 
 class VMType(Enum):
@@ -1158,7 +1172,7 @@ class VMProvisioner:
         # UUID generation handled by libvirt if omitted
         xml = f"""
 <domain type='kvm' xmlns:qemu='http://libvirt.org/schemas/domain/qemu/1.0'>
-  <name>{vm_name}</name>
+  <name>{xml_value(vm_name)}</name>
   <memory unit='KiB'>{memory_mb * 1024}</memory>
   <currentMemory unit='KiB'>{memory_mb * 1024}</currentMemory>
   <vcpu placement='static'>{vcpu}</vcpu>
@@ -1175,7 +1189,7 @@ class VMProvisioner:
 
             xml += f"""
   <os{os_firmware}>
-    <type arch='x86_64' machine='{settings["machine"]}' >hvm</type>
+    <type arch='x86_64' machine='{xml_value(settings["machine"])}' >hvm</type>
 """
             # Feature-based autoselection: only used when firmware='efi' is present.
             if settings["boot_uefi"] and not use_manual_firmware:
@@ -1194,15 +1208,15 @@ class VMProvisioner:
             if settings["boot_uefi"]:
                 if use_manual_firmware:
                     secure_attr = "yes" if settings.get("secure_boot") else "no"
-                    xml += f"""    <loader readonly='yes' secure='{secure_attr}' type='pflash'>{loader_path}</loader>
-    <nvram>{nvram_path}</nvram>
+                    xml += f"""    <loader readonly='yes' secure='{secure_attr}' type='pflash'>{xml_value(loader_path)}</loader>
+    <nvram>{xml_value(nvram_path)}</nvram>
 """
                 else:
                     # Autoselection: let libvirt handle NVRAM, no format specified to avoid conversion errors
                     xml += "    <nvram/>\n"
 
-            xml += f"""    <kernel>{kernel_path}</kernel>
-    <initrd>{initrd_path}</initrd>
+            xml += f"""    <kernel>{xml_value(kernel_path)}</kernel>
+    <initrd>{xml_value(initrd_path)}</initrd>
 """
             cmdline = ""
             logging.info(
@@ -1289,7 +1303,7 @@ class VMProvisioner:
                 cmdline += "console=tty0 console=ttyS0,115200"
 
             if cmdline:
-                xml += f"    <cmdline>{cmdline}</cmdline>\n"
+                xml += f"    <cmdline>{xml_value(cmdline)}</cmdline>\n"
             xml += "  </os>"
         # Standard UEFI/BIOS boot
         elif settings["boot_uefi"]:
@@ -1300,9 +1314,9 @@ class VMProvisioner:
                 # Manual firmware selection: no firmware attribute or sub-element
                 xml += f"""
   <os>
-    <type arch='x86_64' machine='{settings["machine"]}'>hvm</type>
-    <loader readonly='yes' secure='{secure_attr}' type='pflash'>{loader_path}</loader>
-    <nvram>{nvram_path}</nvram>
+    <type arch='x86_64' machine='{xml_value(settings["machine"])}'>hvm</type>
+    <loader readonly='yes' secure='{secure_attr}' type='pflash'>{xml_value(loader_path)}</loader>
+    <nvram>{xml_value(nvram_path)}</nvram>
   </os>
 """
             else:
@@ -1316,7 +1330,7 @@ class VMProvisioner:
 
                 xml += f"""
   <os{os_firmware}>
-    <type arch='x86_64' machine='{settings["machine"]}'>hvm</type>
+    <type arch='x86_64' machine='{xml_value(settings["machine"])}'>hvm</type>
 """
                 # Explicitly disable secure boot if requested OS has issues with it
                 if has_firmware_subelement:
@@ -1332,7 +1346,7 @@ class VMProvisioner:
         else:  # Standard BIOS
             xml += f"""
   <os>
-    <type arch='x86_64' machine='{settings["machine"]}'>hvm</type>
+    <type arch='x86_64' machine='{xml_value(settings["machine"])}'>hvm</type>
   </os>
 """
 
@@ -1382,7 +1396,7 @@ class VMProvisioner:
         xml += f"""
     <disk type='file' device='disk'>
       <driver name='qemu' type='{settings["disk_format"]}' cache='{settings["disk_cache"]}'/>
-      <source file='{disk_path}'/>
+      <source file='{xml_value(disk_path)}'/>
       <target dev='vda' bus='{settings["disk_bus"]}'/>
       <boot order='{hd_boot}'/>
     </disk>
@@ -1392,7 +1406,7 @@ class VMProvisioner:
         xml += f"""
     <disk type='file' device='cdrom'>
       <driver name='qemu' type='raw'/>
-      <source file='{iso_path}'/>
+      <source file='{xml_value(iso_path)}'/>
       <target dev='sda' bus='sata'/>
       <readonly/>
       <boot order='{cd_boot}'/>
@@ -1404,7 +1418,7 @@ class VMProvisioner:
             xml += f"""
     <disk type='file' device='floppy'>
       <driver name='qemu' type='raw'/>
-      <source file='{automation_file_path}'/>
+      <source file='{xml_value(automation_file_path)}'/>
       <target dev='fda' bus='fdc'/>
       <readonly/>
     </disk>
@@ -1414,7 +1428,7 @@ class VMProvisioner:
         # Interface
         xml += f"""
     <interface type='network'>
-      <source network='{network_name}'/>
+      <source network='{xml_value(network_name)}'/>
       <model type='{settings["network_model"]}'/>
     </interface>
 """
@@ -1424,7 +1438,7 @@ class VMProvisioner:
     <video>
       <model type='{settings["video"]}'/>
     </video>
-    <graphics type='{settings["graphics_type"]}' port='-1' autoport='yes' listen='0.0.0.0'>
+    <graphics type='{xml_value(settings["graphics_type"])}' port='-1' autoport='yes' listen='0.0.0.0'>
       <listen type='address' address='0.0.0.0'/>
     </graphics>
 """
@@ -2553,15 +2567,15 @@ class VMProvisioner:
         # it once and then lives on its disk.
         disk_boot, seed_boot = ("2", "1") if boot_device == "cdrom" else ("1", "2")
 
-        os_element = f"  <os>\n    <type arch='{self.host_arch}' machine='{machine}'>hvm</type>\n"
+        os_element = f"  <os>\n    <type arch='{xml_value(self.host_arch)}' machine='{xml_value(machine)}'>hvm</type>\n"
         if boot_uefi and loader_path:
-            os_element += f"    <loader readonly='yes' type='pflash'>{loader_path}</loader>\n"
-            os_element += f"    <nvram>{nvram_path}</nvram>\n"
+            os_element += f"    <loader readonly='yes' type='pflash'>{xml_value(loader_path)}</loader>\n"
+            os_element += f"    <nvram>{xml_value(nvram_path)}</nvram>\n"
         os_element += "    <boot dev='%s'/>\n" % ("cdrom" if boot_device == "cdrom" else "hd")
         os_element += "  </os>\n"
 
         xml = f"""<domain type='kvm'>
-  <name>{vm_name}</name>
+  <name>{xml_value(vm_name)}</name>
   <memory unit='MiB'>{memory_mb}</memory>
   <currentMemory unit='MiB'>{memory_mb}</currentMemory>
   <vcpu placement='static'>{vcpu_count}</vcpu>
@@ -2581,7 +2595,7 @@ class VMProvisioner:
         xml += "  <devices>\n"
         xml += f"""    <disk type='file' device='disk'>
       <driver name='qemu' type='{disk_format}' cache='none'/>
-      <source file='{disk_path}'/>
+      <source file='{xml_value(disk_path)}'/>
       <target dev='vda' bus='virtio'/>
       <boot order='{disk_boot}'/>
     </disk>
@@ -2589,14 +2603,14 @@ class VMProvisioner:
         if seed_path:
             xml += f"""    <disk type='file' device='cdrom'>
       <driver name='qemu' type='raw'/>
-      <source file='{seed_path}'/>
+      <source file='{xml_value(seed_path)}'/>
       <target dev='sda' bus='sata'/>
       <readonly/>
       <boot order='{seed_boot}'/>
     </disk>
 """
         xml += f"""    <interface type='network'>
-      <source network='{network_name}'/>
+      <source network='{xml_value(network_name)}'/>
       <model type='virtio'/>
     </interface>
     <console type='pty'>
@@ -2608,7 +2622,7 @@ class VMProvisioner:
             xml += f"""    <video>
       <model type='virtio'/>
     </video>
-    <graphics type='{graphics}' port='-1' autoport='yes' listen='127.0.0.1'>
+    <graphics type='{xml_value(graphics)}' port='-1' autoport='yes' listen='127.0.0.1'>
       <listen type='address' address='127.0.0.1'/>
     </graphics>
 """
@@ -2623,11 +2637,9 @@ class VMProvisioner:
         them untouched. Values are escaped: a name a caller typed cannot close the
         element it is in.
         """
-        from xml.sax.saxutils import escape
-
         lines = ["  <metadata>\n    <%s xmlns='%s'>\n" % (METADATA_ELEMENT, METADATA_NS)]
         for key, value in metadata.items():
-            lines.append(f"      <{escape(str(key))}>{escape(str(value))}</{escape(str(key))}>\n")
+            lines.append(f"      <{xml_value(key)}>{xml_value(value)}</{xml_value(key)}>\n")
         lines.append(f"    </{METADATA_ELEMENT}>\n  </metadata>\n")
         return "".join(lines)
 

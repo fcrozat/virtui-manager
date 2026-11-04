@@ -393,6 +393,15 @@ class TestBootConfig(unittest.TestCase):
         self.assertEqual(cfg["boot"], "disk")
         self.assertEqual(cfg["metadata"]["instance"], "worker01")
 
+    def test_the_screen_is_one_the_tool_can_give(self):
+        self.assertEqual(self._boot(graphics="vnc")["graphics"], "vnc")
+        self.assertIsNone(self._boot(graphics=None)["graphics"])
+
+    def test_a_screen_the_tool_cannot_give_is_a_bad_config(self):
+        with self.assertRaises(DeployConfigError) as raised:
+            self._boot(graphics="rdp")
+        self.assertIn("graphics", str(raised.exception))
+
     def test_a_number_in_metadata_is_kept_as_text(self):
         cfg = self._boot(metadata={"cpus": 4})
         self.assertEqual(cfg["metadata"]["cpus"], "4")
