@@ -16,12 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   local `autoconnect` configuration. With `--json` it replaces the `server`
   field of the deployment file.
 - Resource commands for a scripted caller, machine-readable like `deploy`:
-  `host capabilities`, `host resources`, `pool list|info|create|delete`,
-  `volume list|info|upload|create-overlay|delete|rename`,
-  `domain list|state|address|start|shutdown|destroy|reboot`,
+  `host capabilities`, `host resources`, `pool list|info|create`,
+  `volume list|info|upload|create-overlay|delete`,
+  `domain list|state|address|metadata|start|shutdown|reboot|destroy|undefine`,
   `network list|info`. Uploading an image streams it into the pool, and an
   overlay records the base it was made from, so a machine can start from a
-  shared image and write nowhere else.
+  shared image and write nowhere else. What the words mean is what the
+  interactive commands mean by them: `shutdown` is the ACPI event a guest can
+  refuse, `destroy` is pulling the plug, and `start` checks that every disk is
+  where the domain says it is before it puts power on.
 - Config-driven deployment can boot a disk instead of installing one: `disk.volume`
   names a volume in the pool (with `disk.backing_volume` to make it as an
   overlay first), `seed.volume` attaches a read-only cloud-init cdrom, and
@@ -37,6 +40,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of the documented statuses (see the CLI manual).
 - `deploy_from_config` returns what it deployed (or, with `--dryrun`, what it
   would deploy).
+- The machine answers about a pool, a volume and a network come from the same
+  reading the interactive tables make (`pool_facts`, `volume_facts`,
+  `network_facts`), so the two cannot tell different stories about one resource.
+- `volume rename` is answered with status 9 and a reason instead of an unknown
+  error: libvirt-python exposes no way to rename a volume, so the message names
+  `virsh vol-rename` as the way that does work.
+
+### Fixed
+- `domain shutdown`, `volume rename` and `network info` were calling libvirt
+  methods that do not exist (`poweroff`, `rename`, `getAutostart`), so each left
+  its caller with an unknown error. A test now reads every libvirt name the
+  resource commands call out of the source and looks it up on the binding.
+- Listing storage pools named a second unreachable pool after the first one, in
+  the recoveries around pools that will not answer, because the previous pool's
+  name was still in scope.
 
 ## [3.3.9]
 

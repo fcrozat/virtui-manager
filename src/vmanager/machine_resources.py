@@ -52,6 +52,17 @@ POOL_PARENT = "/var/lib/libvirt"
 
 # The words of a domain's state, as a caller switches on them. libvirt numbers
 # them; the names are what a program compares, and what `vmc` prints.
+#
+# This is the one reading the machine surface does not share with the
+# interactive one, and it is worth saying why. `vm_queries.get_status` answers the
+# words a person reads — `StatusText.RUNNING`, which is localized and could be
+# reworded some Tuesday without breaking anything. A program compares `running`,
+# and a word it compares is a word that must not move, so the number is turned
+# into a name here instead. What is read is the same: `domain.info()`, the call
+# `get_status` makes when it is not handed the state. The interactive tool reads
+# it through the caches of `vm_service`, which is what keeps its list from
+# freezing; a scripted caller asks once and wants the hypervisor's now, so these
+# commands ask the hypervisor.
 STATE_NAMES = {
     libvirt.VIR_DOMAIN_NOSTATE: "nostate",
     libvirt.VIR_DOMAIN_RUNNING: "running",
