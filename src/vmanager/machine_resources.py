@@ -36,6 +36,8 @@ from .storage_manager import (
     create_overlay_volume,
     create_storage_pool,
     delete_volume,
+    list_storage_pools,
+    list_storage_volumes,
 )
 from .vm_provisioner import METADATA_NS
 from .vm_queries import get_vm_network_ip
@@ -285,6 +287,7 @@ def _pool_command(app, args, _session):
             raise MachineError(
                 f"Could not create the pool '{name}': {e}", EXIT_OPERATION, "operation_failed"
             ) from e
+        _pools_changed()
         return {"name": pool.name(), "path": _pool_path(pool)}
 
     raise MachineError(f"Unknown pool subcommand '{subcommand}'.", EXIT_USAGE, "usage")
@@ -367,6 +370,7 @@ def _volume_command(app, args, session):
             raise MachineError(
                 f"Could not create the overlay '{name}': {e}", EXIT_OPERATION, "operation_failed"
             ) from e
+        _volumes_changed()
         return {"name": vol.name(), "path": _safe_get_volume_path(vol), "backing": backing_path}
 
     if subcommand == "delete":
@@ -376,6 +380,7 @@ def _volume_command(app, args, session):
         if options.get("force"):
             try:
                 vol.delete(libvirt.VIR_STORAGE_VOL_DELETE_WITH_SNAPSHOTS)
+                _volumes_changed()
                 return {"name": name}
             except libvirt.libvirtError:
                 pass  # Fall through to a plain delete, which says what went wrong.
@@ -385,6 +390,7 @@ def _volume_command(app, args, session):
             raise MachineError(
                 f"Could not delete '{name}': {e}", EXIT_OPERATION, "operation_failed"
             ) from e
+        _volumes_changed()
         return {"name": name}
 
     if subcommand == "rename":
@@ -406,6 +412,7 @@ def _volume_command(app, args, session):
             pool.refresh(0)
         except libvirt.libvirtError:
             pass
+        _volumes_changed()
         return {"name": new_name, "was": name}
 
     raise MachineError(f"Unknown volume subcommand '{subcommand}'.", EXIT_USAGE, "usage")
@@ -432,6 +439,8 @@ def _refuse_existing(pool, name, force):
         raise MachineError(
             f"Could not replace the volume '{name}': {e}", EXIT_OPERATION, "operation_failed"
         ) from e
+    # The name is free now, whether or not the new volume ends up on it.
+    _volumes_changed()
 
 
 def _volume_upload(conn, options, session):
@@ -492,12 +501,14 @@ def _volume_upload(conn, options, session):
         # The half-written volume is not something a retry could use.
         try:
             vol.delete(0)
+            _volumes_changed()
         except libvirt.libvirtError:
             pass
         raise MachineError(
             f"Could not upload '{source}': {e}", EXIT_OPERATION, "upload_failed"
         ) from e
 
+    _volumes_changed()
     return {"name": name, "path": _safe_get_volume_path(vol), "bytes": size}
 
 
@@ -563,6 +574,7 @@ def _domain_command(app, args, session):
         ) from e
     if session is not None and subcommand in ("start", "shutdown", "reboot", "destroy"):
         session.progress(subcommand, f"{subcommand} {name}")
+    _machine_changed(app, domain, gone=subcommand == "undefine")
     return {
         "name": name,
         "state": _domain_state(domain) if subcommand != "undefine" else "undefined",
@@ -596,6 +608,39 @@ def _domain_metadata(domain):
         key = child.tag[len(prefix) :] if child.tag.startswith(prefix) else child.tag
         kept[key] = child.text or ""
     return kept
+
+
+def _machine_changed(app, domain, gone=False):
+    """Forget what was remembered about this machine, as the interactive tool does.
+
+    The caches of a session hold the state of each machine and the list of them,
+    and a caller can ask for another thing here after changing one. Only a
+    command that got through says anything: a refusal changed no hypervisor, and
+    emptying the caches for it would cost the next command a round trip for
+    nothing.
+    """
+    service = getattr(app, "vm_service", None)
+    if service is None:
+        return
+    service.invalidate_vm_state_cache(service.get_vm_identity(domain)[0])
+    if gone:
+        # A machine that is not there is a smaller list of them.
+        service.invalidate_domain_cache()
+
+
+def _volumes_changed():
+    """Forget the volumes of a pool, and the pools themselves.
+
+    The space a pool reports is the space its volumes leave, so a volume added or
+    removed makes the pool list as stale as the volume list.
+    """
+    list_storage_volumes.cache_clear()
+    list_storage_pools.cache_clear()
+
+
+def _pools_changed():
+    """Forget the pools, which a pool added or removed has changed."""
+    list_storage_pools.cache_clear()
 
 
 def _refuse_if_running(domain, verb):

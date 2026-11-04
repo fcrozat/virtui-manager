@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 
 import libvirt
 
+from vmanager import machine_resources
 from vmanager.machine_mode import (
     EXIT_CONFIG,
     EXIT_CONNECTION,
@@ -599,6 +600,100 @@ class NetworkAndHostTest(unittest.TestCase):
     def test_resources(self):
         result = answer(self.conn, "host resources")
         self.assertEqual(result["memory_mb"], 32768)
+
+
+class CacheInvalidationTest(unittest.TestCase):
+    """A command that changed the hypervisor must not leave the tool reading the old one.
+
+    What the interactive tool remembers about a hypervisor — the state of each
+    machine, the volumes of a pool, the pools themselves — is held in caches that
+    live as long as the process, and a caller can ask for more than one thing in
+    a session: `domain start worker01` then `domain state worker01` has to answer
+    with the machine as it is now, and a pool that was just created has to be in
+    the list. Each mutating command is checked against the caches its interactive
+    equivalent empties.
+    """
+
+    def setUp(self):
+        self.conn = FakeConnection()
+        self.pool = FakePool("default")
+        self.conn.pools["default"] = self.pool
+        self.pool.volumes["base.qcow2"] = FakeVolume("base.qcow2")
+
+    def app_for(self, active=True):
+        """A fresh session on this hypervisor, with a machine in it or out of it."""
+        self.conn.domains["worker01"] = FakeDomain("worker01", active=active)
+        return make_app(self.conn)
+
+    def quiet_run(self, app, command):
+        run_command(app, command, MachineSession(command, stdout=io.StringIO()))
+
+    def test_a_domain_action_forgets_the_state_of_that_machine(self):
+        for action in ("start", "shutdown", "reboot", "destroy"):
+            with self.subTest(action=action):
+                app = self.app_for(active=action != "start")
+                self.quiet_run(app, f"domain {action} worker01")
+                app.vm_service.invalidate_vm_state_cache.assert_called_once()
+
+    def test_undefining_a_machine_forgets_it_and_its_state(self):
+        app = self.app_for(active=False)
+        self.quiet_run(app, "domain undefine worker01")
+        app.vm_service.invalidate_domain_cache.assert_called_once()
+
+    def test_a_volume_that_changed_forgets_the_volumes_of_its_pool(self):
+        import os
+        from pathlib import Path
+
+        image = Path("/tmp") / "cache-check.qcow2"
+        image.write_bytes(b"x" * 1024)
+        self.addCleanup(lambda: os.remove(image))
+
+        commands = {
+            "upload": f"volume upload --pool default --name new.qcow2 --file {image}",
+            "create-overlay": (
+                "volume create-overlay --pool default --name child.qcow2 --backing base.qcow2"
+            ),
+            "delete": "volume delete --pool default --name base.qcow2",
+            "rename": "volume rename --pool default --name base.qcow2 --new-name newer.qcow2",
+        }
+        for name, command in commands.items():
+            with self.subTest(command=name):
+                self.pool.volumes["base.qcow2"] = FakeVolume("base.qcow2")
+                with (
+                    patch.object(
+                        machine_resources.list_storage_volumes, "cache_clear"
+                    ) as volumes,
+                    patch.object(machine_resources.list_storage_pools, "cache_clear") as pools,
+                    patch("vmanager.machine_resources.create_overlay_volume") as overlay,
+                ):
+                    overlay.return_value = FakeVolume("child.qcow2")
+                    self.quiet_run(make_app(self.conn), command)
+                volumes.assert_called_once()
+                # The space of the pool moved with the volume in it.
+                pools.assert_called_once()
+
+    def test_a_pool_that_changed_forgets_the_pools(self):
+        with (
+            patch.object(machine_resources.list_storage_pools, "cache_clear") as pools,
+            patch("vmanager.machine_resources.create_storage_pool") as create,
+        ):
+            create.return_value = FakePool("fast")
+            self.quiet_run(make_app(self.conn), "pool create fast --path /tmp/fast")
+        pools.assert_called_once()
+
+    def test_a_command_that_changed_nothing_forgets_nothing(self):
+        """A refusal is not a change: the caches are as they were, not emptier."""
+        app = self.app_for(active=True)
+        with self.assertRaises(MachineError):
+            self.quiet_run(app, "domain undefine worker01")
+        app.vm_service.invalidate_vm_state_cache.assert_not_called()
+        app.vm_service.invalidate_domain_cache.assert_not_called()
+
+    def test_a_machine_that_is_not_there_forgets_nothing(self):
+        app = make_app(self.conn)
+        with self.assertRaises(MachineError):
+            self.quiet_run(app, "domain start nosuch")
+        app.vm_service.invalidate_vm_state_cache.assert_not_called()
 
 
 if __name__ == "__main__":

@@ -572,8 +572,14 @@ being moved onto, and without it a name in use is status 6. A flag the command
 has never heard of is status 2 too, naming the flag.
 
 `volume delete` will not remove a volume a running machine is using — that is
-status 7, not a libvirt traceback. `pool delete` removes the pool definition
-and leaves its files to whoever owns them.
+status 7, not a libvirt traceback.
+
+A command that changed the hypervisor is followed by the tool forgetting what it
+remembered about it: the state of the machine it told, and the volumes of the
+pool it wrote to along with the space those volumes leave. So a caller that asks
+for two things in one session — start a machine, then ask its state — is answered
+with what is true now, not with what was cached before the first command. A
+command that refused changed no hypervisor and forgets nothing.
 
 ### Choosing the hypervisor
 
