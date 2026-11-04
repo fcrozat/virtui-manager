@@ -159,3 +159,17 @@ If you need clarification on:
 - Whether a change is appropriate
 
 **Ask the human** rather than making assumptions. The human maintainer has final say on all changes.
+
+## Agent skills
+
+### Issue tracker
+
+GitHub issues in the fork `fcrozat/virtui-manager` — always pass `--repo fcrozat/virtui-manager`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `GLOSSARY.md` at the repo root, ADRs in `docs/adr/`. See `docs/agents/domain.md`.
