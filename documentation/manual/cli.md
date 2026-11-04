@@ -562,6 +562,12 @@ from a volume the pool already holds. `message` is the detail — text for a
 human, never the stage repeated — and `percent` is how far along the command
 thinks it is, from 0 to 100.
 
+It is a number for a progress bar, so it only ever rises within one command: a
+step that would fall behind the highest percent already sent is reported at that
+percent, and a stage repeated without going further — finding the same ISO a
+second time — is not reported at all. And it is the only percentage on an event:
+a message does not carry one of its own to compete with it.
+
 ### Resource commands
 
 The commands a program needs to prepare a machine, and to ask what the

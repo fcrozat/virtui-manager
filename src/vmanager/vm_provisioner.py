@@ -108,6 +108,39 @@ VM_TYPE_DEFAULTS: Dict[VMType, Dict[str, int]] = {
 }
 
 
+def progress_reporter(progress_callback: Optional[Callable[[str, int], None]]):
+    """A `report(message, percent)` for one deployment of a machine.
+
+    Two rules, both about what a percentage means to whoever watches it fill:
+
+    * a percent under the highest already sent is raised to it, so the bar only
+      ever advances. The install route looks the ISO up more than once, and a
+      lookup done after the automation configuration cannot be less done than
+      the stage that followed it;
+    * a stage already reported, at a percent that advances nothing, reports
+      nothing. Finding the same ISO a second time changed nothing, and an event
+      for it would rewind the bar to where that lookup was first announced.
+
+    A stage repeated with more done - a transfer - is progress and passes.
+    With nobody watching, the same numbers go to the log.
+    """
+    highest = -1
+    announced: set = set()
+
+    def report(message: str, percent: int) -> None:
+        nonlocal highest
+        if message in announced and percent <= highest:
+            return
+        announced.add(message)
+        highest = max(highest, percent)
+        if progress_callback:
+            progress_callback(message, highest)
+        else:
+            logging.info(f"[{highest}%] {message}")
+
+    return report
+
+
 class VMProvisioner:
     def __init__(self, conn: libvirt.virConnect):
         self.conn = conn
@@ -2492,11 +2525,7 @@ class VMProvisioner:
 
         # (message, percent), the shape `provision_vm` and the machine contract
         # use: a caller cannot put a percentage in a stage field.
-        def report(message: str, percent: int) -> None:
-            if progress_callback:
-                progress_callback(message, percent)
-            else:
-                logging.info(f"[{percent}%] {message}")
+        report = progress_reporter(progress_callback)
 
         machine_types = get_latest_machine_types(self.conn, self.host_arch)
         default_machine = machine_types["pc-q35"] if boot_uefi else machine_types["pc-i440fx"]
@@ -2690,9 +2719,7 @@ class VMProvisioner:
                 `provision_existing_volume` keeps it; nothing here interprets it.
         """
 
-        def report(stage, percent):
-            if progress_callback:
-                progress_callback(stage, percent)
+        report = progress_reporter(progress_callback)
 
         # Apply a type-appropriate default disk size when the caller did not
         # provide one (e.g. the CLI installvm command).
@@ -2869,10 +2896,9 @@ class VMProvisioner:
                 report(StaticText.UPLOADING_ISO, 55)
 
                 def upload_progress(p):
-                    report(
-                        StaticText.UPLOADING_PROGRESS_TEMPLATE.format(progress=p),
-                        55 + int(p * 0.2),
-                    )
+                    # The transfer's own percentage is not this event's, so it
+                    # stays out of the message: one number per event.
+                    report(StaticText.UPLOADING_ISO, 55 + int(p * 0.2))
 
                 iso_path = self.upload_iso(iso_path, storage_pool_name, upload_progress)
                 logging.info(f"ISO uploaded to storage pool: {iso_path}")
@@ -3499,7 +3525,7 @@ class VMProvisioner:
             metadata=metadata,
         )
 
-        report(StaticText.PROVISIONING_CONFIGURING_VM_XML, 90)
+        report(StaticText.PROVISIONING_DEFINING_VM, 90)
         dom = self.conn.defineXML(xml_desc)
         dom.create()
 
