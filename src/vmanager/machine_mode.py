@@ -15,6 +15,7 @@ import json
 import shlex
 import sys
 
+from .constants import AppInfo, MachineModeText
 from .utils import sanitize_sensitive_data
 
 # Version of this contract, reported by ``machine info``.
@@ -127,13 +128,17 @@ def machine_command(name):
 @machine_command("machine")
 def _machine_info(_app, args, _session):
     """``machine info``: what this vmc is, and what it answers to."""
-    from .constants import AppInfo
-
     if args and args[0] != "info":
-        raise MachineError(f"Unknown machine subcommand '{args[0]}'.", EXIT_USAGE, "usage")
+        raise MachineError(
+            MachineModeText.UNKNOWN_SUBCOMMAND_TEMPLATE.format(subcommand=args[0]),
+            EXIT_USAGE,
+            "usage",
+        )
     for word in args[1:]:
         if word.startswith("--"):
-            raise MachineError(f"machine info has no {word} flag.", EXIT_USAGE, "usage")
+            raise MachineError(
+                MachineModeText.NO_SUCH_FLAG_TEMPLATE.format(flag=word), EXIT_USAGE, "usage"
+            )
     return {
         "protocol": PROTOCOL_VERSION,
         "name": AppInfo.name,
@@ -158,9 +163,11 @@ def run_command(app, line, session):
     try:
         parts = shlex.split(line)
     except ValueError as e:
-        raise MachineError(f"Cannot parse command: {e}", EXIT_USAGE, "usage") from e
+        raise MachineError(
+            MachineModeText.CANNOT_PARSE_COMMAND_TEMPLATE.format(error=e), EXIT_USAGE, "usage"
+        ) from e
     if not parts:
-        raise MachineError("Empty command.", EXIT_USAGE, "usage")
+        raise MachineError(MachineModeText.EMPTY_COMMAND, EXIT_USAGE, "usage")
 
     handler = MACHINE_COMMANDS.get(parts[0])
     if handler is None:
@@ -169,11 +176,13 @@ def run_command(app, line, session):
         # not know at all is the caller's mistake (2).
         if hasattr(app, f"do_{parts[0]}"):
             raise MachineError(
-                f"The command '{parts[0]}' has no machine-readable result.",
+                MachineModeText.NO_MACHINE_RESULT_TEMPLATE.format(command=parts[0]),
                 EXIT_UNSUPPORTED,
                 "unsupported",
             )
-        raise MachineError(f"Unknown command '{parts[0]}'.", EXIT_USAGE, "usage")
+        raise MachineError(
+            MachineModeText.UNKNOWN_COMMAND_TEMPLATE.format(command=parts[0]), EXIT_USAGE, "usage"
+        )
 
     data = handler(app, parts[1:], session)
     return session.succeed(data)

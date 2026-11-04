@@ -1380,6 +1380,23 @@ class VMDetailConstants:  # pylint: disable=too-few-public-methods
     SOUND_MODELS_FALLBACK = ["none", "ich6", "ich9", "ac97", "sb16", "usb"]
 
 
+class MachineModeText:  # pylint: disable=too-few-public-methods
+    """The words a machine caller is answered with when its command is wrong.
+
+    Deliberately not passed through `_()`: these strings belong to a contract a
+    program reads, and translating them would change what the answer says while
+    the exit status stayed the same. The `code` beside them is the stable part;
+    this is the part written for the human reading the log afterwards.
+    """
+
+    EMPTY_COMMAND = "Empty command."
+    CANNOT_PARSE_COMMAND_TEMPLATE = "Cannot parse command: {error}"
+    UNKNOWN_COMMAND_TEMPLATE = "Unknown command '{command}'."
+    NO_MACHINE_RESULT_TEMPLATE = "The command '{command}' has no machine-readable result."
+    UNKNOWN_SUBCOMMAND_TEMPLATE = "Unknown machine subcommand '{subcommand}'."
+    NO_SUCH_FLAG_TEMPLATE = "machine info has no {flag} flag."
+
+
 class ProgressMessages:  # pylint: disable=too-few-public-methods
     """Constants for progress and in-progress status messages"""
 
