@@ -684,7 +684,7 @@ class DisplayManager:
         """Handle SPICE new channel event."""
         if self.verbose:
             print(f"SPICE channel created: {channel}")
-        
+
         # Connect to channel events to detect disconnections
         GObject.Object.connect(channel, "channel-event", self.on_spice_channel_event)
 
@@ -692,22 +692,22 @@ class DisplayManager:
         if SPICE_AVAILABLE and isinstance(channel, SpiceClientGLib.MainChannel):
             if self.verbose:
                 print("Connecting to SPICE MainChannel clipboard signals")
-            
+
             # Request data when guest grabs the clipboard
             GObject.Object.connect(
                 channel, "main-clipboard-selection-grab", self.on_spice_clipboard_selection_grab
             )
-            
+
             # Handle received data
             GObject.Object.connect(
                 channel, "main-clipboard-selection-data", self.on_spice_clipboard_selection_data
             )
-            
+
             # Monitor agent status
             GObject.Object.connect(
                 channel, "notify::agent-connected", self.on_spice_agent_connected
             )
-            
+
             # Initial check
             if channel.get_property("agent-connected"):
                 self.log("SPICE Agent is connected and active.")
@@ -724,7 +724,7 @@ class DisplayManager:
         """Handle SPICE clipboard grab from guest."""
         if self.verbose:
             print(f"SPICE Clipboard Grab: selection={selection}, types={types}")
-        
+
         # If guest has text data, request it to update our cache
         # SpiceClientGLib.ClipboardType.TEXT is usually 1
         for i in range(ntypes):
@@ -740,7 +740,7 @@ class DisplayManager:
         """Handle SPICE clipboard data from guest."""
         if self.verbose:
             print(f"SPICE Clipboard Data: {size} bytes, type={clip_type}")
-        
+
         if clip_type == SpiceClientGLib.ClipboardType.TEXT and self.clipboard_update_callback:
             try:
                 # data is usually a bytearray/bytes

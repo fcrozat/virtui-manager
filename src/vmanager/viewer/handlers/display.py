@@ -10,11 +10,13 @@ from typing import Optional, Callable
 from ..constants import SPICE_RECONNECT_DELAY_MS
 
 import gi
+
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, Gdk, GLib
 
 try:
     from gi.repository import SpiceClientGtk
+
     SPICE_AVAILABLE = True
 except ImportError:
     SPICE_AVAILABLE = False
@@ -75,7 +77,9 @@ class DisplayHandler:
 
         self.log = log_callback if log_callback else lambda msg: None
         self.notify = notification_callback if notification_callback else lambda msg, typ: None
-        self.show_error_dialog = error_dialog_callback if error_dialog_callback else lambda msg: None
+        self.show_error_dialog = (
+            error_dialog_callback if error_dialog_callback else lambda msg: None
+        )
 
         # Display state
         self.is_fullscreen: bool = False
@@ -98,13 +102,10 @@ class DisplayHandler:
             return
 
         dialog = Gtk.FileChooserDialog(
-            title="Save Screenshot",
-            parent=self.window,
-            action=Gtk.FileChooserAction.SAVE
+            title="Save Screenshot", parent=self.window, action=Gtk.FileChooserAction.SAVE
         )
         dialog.add_buttons(
-            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
-            Gtk.STOCK_SAVE, Gtk.ResponseType.ACCEPT
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_SAVE, Gtk.ResponseType.ACCEPT
         )
 
         timestamp = time.strftime("%Y%m%d-%H%M%S")
@@ -176,8 +177,9 @@ class DisplayHandler:
             True if event was handled, False otherwise
         """
         # Ctrl+F for fullscreen toggle
-        if (event.keyval == Gdk.KEY_f or event.keyval == Gdk.KEY_F) and \
-           (event.state & Gdk.ModifierType.CONTROL_MASK):
+        if (event.keyval == Gdk.KEY_f or event.keyval == Gdk.KEY_F) and (
+            event.state & Gdk.ModifierType.CONTROL_MASK
+        ):
             self.fs_button.set_active(not self.fs_button.get_active())
             return True
         return False
@@ -310,4 +312,4 @@ class DisplayHandler:
             self.on_keyboard_grab_released(widget)
 
 
-__all__ = ['DisplayHandler']
+__all__ = ["DisplayHandler"]

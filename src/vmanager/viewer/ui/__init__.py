@@ -17,13 +17,13 @@ from .menus import (
 )
 
 __all__ = [
-    'ConsoleTab',
-    'SnapshotTab',
-    'USBTab',
-    'MainWindowBuilder',
-    'build_settings_menu',
-    'build_boot_menu',
-    'build_power_menu',
-    'build_keys_menu',
-    'build_clipboard_menu',
+    "ConsoleTab",
+    "SnapshotTab",
+    "USBTab",
+    "MainWindowBuilder",
+    "build_settings_menu",
+    "build_boot_menu",
+    "build_power_menu",
+    "build_keys_menu",
+    "build_clipboard_menu",
 ]

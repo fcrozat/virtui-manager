@@ -9,6 +9,7 @@ Provides a unified interface for managing installation templates including:
 - Deleting user templates
 - Exporting templates to files
 """
+
 from __future__ import annotations
 
 import logging
@@ -690,12 +691,18 @@ class AutoFillConfigModal(BaseModal[Optional[dict]]):
                     with Vertical():
                         yield Label(StaticText.LANGUAGE_LABEL, classes="label")
                         language_options = [
-                            (StaticText.LANGUAGE_VALUE_ENGLISH_US, StaticText.LANGUAGE_VALUE_ENGLISH_US),
+                            (
+                                StaticText.LANGUAGE_VALUE_ENGLISH_US,
+                                StaticText.LANGUAGE_VALUE_ENGLISH_US,
+                            ),
                             (StaticText.LANGUAGE_VALUE_FRENCH, StaticText.LANGUAGE_VALUE_FRENCH),
                             (StaticText.LANGUAGE_VALUE_GERMAN, StaticText.LANGUAGE_VALUE_GERMAN),
                             (StaticText.LANGUAGE_VALUE_SPANISH, StaticText.LANGUAGE_VALUE_SPANISH),
                             (StaticText.LANGUAGE_VALUE_ITALIAN, StaticText.LANGUAGE_VALUE_ITALIAN),
-                            (StaticText.LANGUAGE_VALUE_ENGLISH_UK, StaticText.LANGUAGE_VALUE_ENGLISH_UK),
+                            (
+                                StaticText.LANGUAGE_VALUE_ENGLISH_UK,
+                                StaticText.LANGUAGE_VALUE_ENGLISH_UK,
+                            ),
                         ]
                         current_language = self.prefill_config.get("language") or "English (US)"
                         yield Select(
@@ -707,7 +714,9 @@ class AutoFillConfigModal(BaseModal[Optional[dict]]):
 
                 # SUSE SCC Configuration Section - wrapped in Collapsible
                 with Collapsible(
-                    title=StaticText.SUSE_SCC_CONFIGURATION_HEADER, collapsed=True, id="scc-collapsible"
+                    title=StaticText.SUSE_SCC_CONFIGURATION_HEADER,
+                    collapsed=True,
+                    id="scc-collapsible",
                 ):
                     yield Label(StaticText.SUSE_SCC_CONFIGURATION_SUBTITLE, classes="subtitle")
 

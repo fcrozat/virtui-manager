@@ -1438,7 +1438,11 @@ class MachineResourceText:  # pylint: disable=too-few-public-methods
     COULD_NOT_CREATE_OVERLAY_TEMPLATE = "Could not create the overlay '{name}': {error}"
     COULD_NOT_REPLACE_VOLUME_TEMPLATE = "Could not replace the volume '{name}': {error}"
     COULD_NOT_DELETE_VOLUME_TEMPLATE = "Could not delete '{name}': {error}"
-    COULD_NOT_RENAME_VOLUME_TEMPLATE = "Could not rename '{name}' to '{new_name}': {error}"
+    VOLUME_RENAME_IS_NOT_POSSIBLE = (
+        "Renaming a volume is not something the libvirt binding can do. "
+        "Do it with 'virsh vol-rename' on the hypervisor, "
+        "or upload the bytes under the new name."
+    )
     COULD_NOT_UPLOAD_TEMPLATE = "Could not upload '{source}': {error}"
 
     # Domains, networks, hosts

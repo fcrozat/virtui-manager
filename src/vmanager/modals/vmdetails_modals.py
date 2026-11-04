@@ -1,6 +1,7 @@
 """
 Main interface
 """
+
 from __future__ import annotations
 
 import logging
@@ -1986,7 +1987,9 @@ class VMDetailModal(ModalScreen):
 
                         # CPU Model Selection
                         current_cpu_model = self.vm_info.get("cpu_model", "default")
-                        yield Label(StaticText.CPU_MODEL_LABEL, id="cpu-model-label", classes="tabd")
+                        yield Label(
+                            StaticText.CPU_MODEL_LABEL, id="cpu-model-label", classes="tabd"
+                        )
 
                         arch_elem = xml_root.find(".//os/type")
                         arch = arch_elem.get("arch") if arch_elem is not None else "x86_64"

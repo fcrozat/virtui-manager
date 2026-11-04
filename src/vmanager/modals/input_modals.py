@@ -1,6 +1,7 @@
 """
 Modals for input device configuration and all Input dialog
 """
+
 from __future__ import annotations
 
 import os
@@ -125,7 +126,9 @@ class AddWatchdogModal(BaseModal[Optional[dict]]):
                 id="watchdog-action-select",
             )
             with Horizontal():
-                yield Button(btn_label, variant="primary", id="add-watchdog", disabled=not self.is_edit)
+                yield Button(
+                    btn_label, variant="primary", id="add-watchdog", disabled=not self.is_edit
+                )
                 yield Button(ButtonLabels.CANCEL, variant="default", id="cancel-watchdog")
 
     @on(Select.Changed)
@@ -134,7 +137,9 @@ class AddWatchdogModal(BaseModal[Optional[dict]]):
         action_select = self.query_one("#watchdog-action-select", Select)
         is_model_selected = model_select.value != Select.NULL
         is_action_selected = action_select.value != Select.NULL
-        self.query_one("#add-watchdog", Button).disabled = not (is_model_selected and is_action_selected)
+        self.query_one("#add-watchdog", Button).disabled = not (
+            is_model_selected and is_action_selected
+        )
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "add-watchdog":
@@ -270,7 +275,9 @@ def _sanitize_domain_name(input_string: str) -> tuple[str, bool]:
     return sanitized, was_modified
 
 
-def validate_integer_range(value: str, min_val: int, max_val: int, field_name: str = "Value") -> str:
+def validate_integer_range(
+    value: str, min_val: int, max_val: int, field_name: str = "Value"
+) -> str:
     """Validate integer input within range. Returns sanitized value or raises ValueError."""
     try:
         int_val = int(value)
@@ -297,14 +304,16 @@ def validate_ip_or_cidr(value: str) -> str:
         return str(ipaddress.ip_address(value.strip()))
 
 
-def validate_path_in_allowed_dirs(path: str, allowed_dirs: list[str] | None = None, conn=None) -> str:
+def validate_path_in_allowed_dirs(
+    path: str, allowed_dirs: list[str] | None = None, conn=None
+) -> str:
     """Resolve path and verify it's within allowed directories.
-    
+
     If conn provided, dynamically add all active pool target paths.
     """
     if allowed_dirs is None:
         allowed_dirs = ["/var/lib/libvirt", "/var/lib/libvirt/images", "/tmp"]
-    
+
     # Add active storage pool target paths when conn provided
     if conn is not None:
         try:
@@ -321,7 +330,7 @@ def validate_path_in_allowed_dirs(path: str, allowed_dirs: list[str] | None = No
                     pass
         except Exception:
             pass
-    
+
     resolved = Path(path).resolve()
     for allowed in allowed_dirs:
         allowed_real = os.path.realpath(allowed)

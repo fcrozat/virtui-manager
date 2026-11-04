@@ -27,6 +27,7 @@ class TestConfig(unittest.TestCase):
         self.patcher.stop()
         # Clean up temp directory
         import shutil
+
         shutil.rmtree(self.temp_dir, ignore_errors=True)
 
     def test_load_config(self):
@@ -70,6 +71,7 @@ class TestConfig(unittest.TestCase):
         # Test default values from src/vmanager/config.py
         self.assertEqual(config.get("LOG_LEVEL"), "INFO")
         self.assertEqual(config.get("STATS_INTERVAL"), 5)
+
 
 if __name__ == "__main__":
     unittest.main()

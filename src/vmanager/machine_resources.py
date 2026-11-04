@@ -25,6 +25,7 @@ from .machine_mode import (
     EXIT_EXISTS,
     EXIT_NOT_FOUND,
     EXIT_OPERATION,
+    EXIT_UNSUPPORTED,
     EXIT_USAGE,
     MachineError,
     machine_command,
@@ -484,28 +485,16 @@ def _volume_command(app, args, session):
         return {"name": name}
 
     if subcommand == "rename":
-        pool = _pool(conn, _required(options, "pool", "volume rename"))
-        name = _required(options, "name", "volume rename")
-        new_name = _required(options, "new-name", "volume rename")
-        vol = _volume(pool, name)
-        _refuse_existing(pool, new_name, options.get("force"))
-        try:
-            vol.rename(new_name, 0)
-        except libvirt.libvirtError as e:
-            raise MachineError(
-                MachineResourceText.COULD_NOT_RENAME_VOLUME_TEMPLATE.format(
-                    name=name, new_name=new_name, error=e
-                ),
-                EXIT_OPERATION,
-                "operation_failed",
-            ) from e
-        # A pool needs a moment and a refresh before the new name is visible.
-        try:
-            pool.refresh(0)
-        except libvirt.libvirtError:
-            pass
-        _volumes_changed()
-        return {"name": new_name, "was": name}
+        # There is nothing to call. libvirt has `virStorageVolRename`, and the
+        # Python binding does not wrap it: `virStorageVol` answers to `upload`,
+        # `download`, `delete`, `resize` and `wipe`, and not to `rename`. The
+        # command was calling a method of that name all along, and the
+        # AttributeError was swallowed as an unknown error, so a caller asking
+        # politely was told nothing useful. Saying it cannot be done, and where
+        # it can, is the whole of the honest answer.
+        raise MachineError(
+            MachineResourceText.VOLUME_RENAME_IS_NOT_POSSIBLE, EXIT_UNSUPPORTED, "unsupported"
+        )
 
 
 def _refuse_existing(pool, name, force):
@@ -865,7 +854,9 @@ def _network_command(app, args, _session):
             "name": network.name(),
             "state": "active" if network.isActive() else "inactive",
             "bridge": bridge,
-            "autostart": bool(network.getAutostart()),
+            # The binding's getter is `autostart()`; `getAutostart` is what this
+            # file said, and it is not a method, so the command never answered.
+            "autostart": bool(network.autostart()),
         }
 
 

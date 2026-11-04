@@ -1,6 +1,7 @@
 """
 Base Modal stuff
 """
+
 from __future__ import annotations
 
 import re

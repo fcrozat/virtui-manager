@@ -27,7 +27,9 @@ _ACTIVE_SERVERS = []
 def _cleanup_servers():
     """Stop all active servers on application exit."""
     if _ACTIVE_SERVERS:
-        logging.getLogger(__name__).info(f"Cleaning up {len(_ACTIVE_SERVERS)} active Auto servers...")
+        logging.getLogger(__name__).info(
+            f"Cleaning up {len(_ACTIVE_SERVERS)} active Auto servers..."
+        )
         # Create a copy of the list to iterate over, as stop() modifies the original list
         for server in _ACTIVE_SERVERS[:]:
             try:
@@ -84,7 +86,7 @@ class AutoHTTPServer:
                     )
 
                 def log_error(self, format, *args):
-                    # Suppress "Bad request version" or "Bad request syntax" errors 
+                    # Suppress "Bad request version" or "Bad request syntax" errors
                     # which happen when client tries HTTPS on HTTP port (common with Agama probing)
                     if any(msg in format for msg in ["Bad request version", "Bad request syntax"]):
                         return
@@ -200,10 +202,18 @@ class RemoteAutoHTTPServer:
         """SSH ControlMaster args for connection reuse."""
         if not self._ssh_master:
             self._ssh_master = f"/tmp/virtui_ssh_{uuid.uuid4().hex[:8]}"
-        return ["-o", "ControlMaster=auto", "-o", f"ControlPath={self._ssh_master}",
-                "-o", "ControlPersist=60"]
+        return [
+            "-o",
+            "ControlMaster=auto",
+            "-o",
+            f"ControlPath={self._ssh_master}",
+            "-o",
+            "ControlPersist=60",
+        ]
 
-    def _run_remote(self, cmd: str, check: bool = True, timeout: int = 30) -> subprocess.CompletedProcess:
+    def _run_remote(
+        self, cmd: str, check: bool = True, timeout: int = 30
+    ) -> subprocess.CompletedProcess:
         """Run a command on the remote host via SSH."""
         return subprocess.run(
             ["ssh", *self._ssh_control_args(), self.remote_host, cmd],
@@ -400,9 +410,19 @@ class RemoteAutoHTTPServer:
             self.remote_dir = None
             self._pid_file = None
             if self._ssh_master:
-                subprocess.run(["ssh", "-o", f"ControlPath={self._ssh_master}",
-                                "-O", "exit", self.remote_host],
-                               capture_output=True, check=False, timeout=10)
+                subprocess.run(
+                    [
+                        "ssh",
+                        "-o",
+                        f"ControlPath={self._ssh_master}",
+                        "-O",
+                        "exit",
+                        self.remote_host,
+                    ],
+                    capture_output=True,
+                    check=False,
+                    timeout=10,
+                )
                 self._ssh_master = None
 
     def get_url(self, filename: str, host: str = "localhost") -> str:

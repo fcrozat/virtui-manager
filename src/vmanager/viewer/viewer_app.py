@@ -218,11 +218,7 @@ class RemoteViewer(Gtk.Application):
                 ):
                     continue
 
-                state_str = (
-                    "Running"
-                    if state_code == libvirt.VIR_DOMAIN_RUNNING
-                    else "Paused"
-                )
+                state_str = "Running" if state_code == libvirt.VIR_DOMAIN_RUNNING else "Paused"
 
                 # Detect protocol
                 xml = dom.XMLDesc(libvirt.VIR_DOMAIN_XML_SECURE)
@@ -441,76 +437,76 @@ class RemoteViewer(Gtk.Application):
         """
         return {
             # Power handlers
-            "on_power_start": lambda btn, pop: self.power_handler.on_start(btn, pop)
-            if self.power_handler
-            else None,
-            "on_power_pause": lambda btn, pop: self.power_handler.on_pause(btn, pop)
-            if self.power_handler
-            else None,
-            "on_power_resume": lambda btn, pop: self.power_handler.on_resume(btn, pop)
-            if self.power_handler
-            else None,
-            "on_power_shutdown": lambda btn, pop: self.power_handler.on_shutdown(btn, pop)
-            if self.power_handler
-            else None,
-            "on_power_reboot": lambda btn, pop: self.power_handler.on_reboot(btn, pop)
-            if self.power_handler
-            else None,
-            "on_power_destroy": lambda btn, pop: self.power_handler.on_destroy(btn, pop)
-            if self.power_handler
-            else None,
-            "on_power_hibernate": lambda btn, pop: self.power_handler.on_hibernate(btn, pop)
-            if self.power_handler
-            else None,
-            "on_power_menu_show": lambda pop: self.power_handler.update_menu_sensitivity(pop)
-            if self.power_handler
-            else None,
+            "on_power_start": lambda btn, pop: (
+                self.power_handler.on_start(btn, pop) if self.power_handler else None
+            ),
+            "on_power_pause": lambda btn, pop: (
+                self.power_handler.on_pause(btn, pop) if self.power_handler else None
+            ),
+            "on_power_resume": lambda btn, pop: (
+                self.power_handler.on_resume(btn, pop) if self.power_handler else None
+            ),
+            "on_power_shutdown": lambda btn, pop: (
+                self.power_handler.on_shutdown(btn, pop) if self.power_handler else None
+            ),
+            "on_power_reboot": lambda btn, pop: (
+                self.power_handler.on_reboot(btn, pop) if self.power_handler else None
+            ),
+            "on_power_destroy": lambda btn, pop: (
+                self.power_handler.on_destroy(btn, pop) if self.power_handler else None
+            ),
+            "on_power_hibernate": lambda btn, pop: (
+                self.power_handler.on_hibernate(btn, pop) if self.power_handler else None
+            ),
+            "on_power_menu_show": lambda pop: (
+                self.power_handler.update_menu_sensitivity(pop) if self.power_handler else None
+            ),
             # Display handlers
-            "on_screenshot_clicked": lambda btn: self.display_handler.on_screenshot_clicked(btn)
-            if self.display_handler
-            else None,
-            "on_reconnect_clicked": lambda btn: self.display_handler.on_reconnect_clicked(btn)
-            if self.display_handler
-            else None,
-            "on_send_key": lambda btn, keys, pop: self.display_handler.on_send_key(btn, keys, pop)
-            if self.display_handler
-            else None,
-            "on_key_press": lambda w, e: self.display_handler.on_key_press(w, e)
-            if self.display_handler
-            else None,
-            "on_fs_button_toggled": lambda btn: self.display_handler.on_fullscreen_toggled(btn)
-            if self.display_handler
-            else None,
-            "on_scaling_toggled": lambda btn: self.display_handler.on_scaling_toggled(btn)
-            if self.display_handler
-            else None,
-            "on_smoothing_toggled": lambda btn: self.display_handler.on_smoothing_toggled(btn)
-            if self.display_handler
-            else None,
-            "on_lossy_toggled": lambda btn: self.display_handler.on_lossy_toggled(btn)
-            if self.display_handler
-            else None,
-            "on_view_only_toggled": lambda btn: self.display_handler.on_view_only_toggled(btn)
-            if self.display_handler
-            else None,
-            "on_depth_changed": lambda combo: self.display_handler.on_depth_changed(
-                combo, self._apply_vnc_depth
-            )
-            if self.display_handler
-            else None,
+            "on_screenshot_clicked": lambda btn: (
+                self.display_handler.on_screenshot_clicked(btn) if self.display_handler else None
+            ),
+            "on_reconnect_clicked": lambda btn: (
+                self.display_handler.on_reconnect_clicked(btn) if self.display_handler else None
+            ),
+            "on_send_key": lambda btn, keys, pop: (
+                self.display_handler.on_send_key(btn, keys, pop) if self.display_handler else None
+            ),
+            "on_key_press": lambda w, e: (
+                self.display_handler.on_key_press(w, e) if self.display_handler else None
+            ),
+            "on_fs_button_toggled": lambda btn: (
+                self.display_handler.on_fullscreen_toggled(btn) if self.display_handler else None
+            ),
+            "on_scaling_toggled": lambda btn: (
+                self.display_handler.on_scaling_toggled(btn) if self.display_handler else None
+            ),
+            "on_smoothing_toggled": lambda btn: (
+                self.display_handler.on_smoothing_toggled(btn) if self.display_handler else None
+            ),
+            "on_lossy_toggled": lambda btn: (
+                self.display_handler.on_lossy_toggled(btn) if self.display_handler else None
+            ),
+            "on_view_only_toggled": lambda btn: (
+                self.display_handler.on_view_only_toggled(btn) if self.display_handler else None
+            ),
+            "on_depth_changed": lambda combo: (
+                self.display_handler.on_depth_changed(combo, self._apply_vnc_depth)
+                if self.display_handler
+                else None
+            ),
             "on_boot_device_changed": lambda combo: self._on_boot_device_changed(combo),
             "on_boot_menu_show": lambda pop: self._on_boot_menu_show(pop),
             "on_logs_toggled": lambda btn: self._on_logs_toggled(btn),
             # Clipboard handlers
-            "on_type_clipboard": lambda btn, pop: self.clipboard_handler.on_type(btn, pop)
-            if self.clipboard_handler
-            else None,
-            "on_push_clipboard": lambda btn, pop: self.clipboard_handler.on_push(btn, pop)
-            if self.clipboard_handler
-            else None,
-            "on_pull_clipboard": lambda btn, pop: self.clipboard_handler.on_pull(btn, pop)
-            if self.clipboard_handler
-            else None,
+            "on_type_clipboard": lambda btn, pop: (
+                self.clipboard_handler.on_type(btn, pop) if self.clipboard_handler else None
+            ),
+            "on_push_clipboard": lambda btn, pop: (
+                self.clipboard_handler.on_push(btn, pop) if self.clipboard_handler else None
+            ),
+            "on_pull_clipboard": lambda btn, pop: (
+                self.clipboard_handler.on_pull(btn, pop) if self.clipboard_handler else None
+            ),
             # Tab switch
             "on_notebook_switch_page": lambda nb, page, page_num: self._on_notebook_switch_page(
                 nb, page, page_num
@@ -557,7 +553,7 @@ class RemoteViewer(Gtk.Application):
             self.display_manager.set_clipboard_update_callback(
                 lambda text: self.clipboard_handler.on_guest_cut_text(text, source="SPICE")
             )
-        
+
         # Monitor host clipboard for cache updates (works for both VNC and SPICE)
         self.clipboard.connect("owner-change", self.clipboard_handler.on_owner_change)
 

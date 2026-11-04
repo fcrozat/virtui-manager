@@ -1,6 +1,7 @@
 """
 Modals for VM selection.
 """
+
 from __future__ import annotations
 
 import logging

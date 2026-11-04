@@ -9,6 +9,7 @@ from typing import Optional, Callable
 
 import gi
 import libvirt
+
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, GLib
 
@@ -22,10 +23,14 @@ class SnapshotTab:
     Provides snapshot management: create, delete, restore snapshots.
     """
 
-    def __init__(self, domain, window=None,
-                 log_callback: Optional[Callable[[str], None]] = None,
-                 notification_callback: Optional[Callable[[str, Gtk.MessageType], None]] = None,
-                 reconnect_callback: Optional[Callable[[], None]] = None):
+    def __init__(
+        self,
+        domain,
+        window=None,
+        log_callback: Optional[Callable[[str], None]] = None,
+        notification_callback: Optional[Callable[[str, Gtk.MessageType], None]] = None,
+        reconnect_callback: Optional[Callable[[], None]] = None,
+    ):
         """
         Initialize the snapshot tab.
 
@@ -117,13 +122,15 @@ class SnapshotTab:
             # Sort by creation time (newest first)
             snapshots.sort(key=lambda x: x.get("creation_time", ""), reverse=True)
             for snap in snapshots:
-                self.snapshots_store.append([
-                    snap.get("name", "N/A"),
-                    snap.get("description", ""),
-                    snap.get("creation_time", "N/A"),
-                    snap.get("state", "N/A"),
-                    snap.get("snapshot_object"),
-                ])
+                self.snapshots_store.append(
+                    [
+                        snap.get("name", "N/A"),
+                        snap.get("description", ""),
+                        snap.get("creation_time", "N/A"),
+                        snap.get("state", "N/A"),
+                        snap.get("snapshot_object"),
+                    ]
+                )
         else:
             self.notify("No VM domain available to list snapshots.", Gtk.MessageType.WARNING)
 
@@ -156,8 +163,7 @@ class SnapshotTab:
             flags=Gtk.DialogFlags.MODAL | Gtk.DialogFlags.DESTROY_WITH_PARENT,
         )
         dialog.add_buttons(
-            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL,
-            Gtk.STOCK_OK, Gtk.ResponseType.OK
+            Gtk.STOCK_CANCEL, Gtk.ResponseType.CANCEL, Gtk.STOCK_OK, Gtk.ResponseType.OK
         )
 
         content_area = dialog.get_content_area()
@@ -237,9 +243,7 @@ class SnapshotTab:
             buttons=Gtk.ButtonsType.YES_NO,
             text="Confirm Snapshot Deletion",
         )
-        dialog.format_secondary_text(
-            f"Are you sure you want to delete snapshot '{snapshot_name}'?"
-        )
+        dialog.format_secondary_text(f"Are you sure you want to delete snapshot '{snapshot_name}'?")
         response = dialog.run()
         dialog.destroy()
 
@@ -371,4 +375,4 @@ class SnapshotTab:
             self.wait_dialog = None
 
 
-__all__ = ['SnapshotTab']
+__all__ = ["SnapshotTab"]

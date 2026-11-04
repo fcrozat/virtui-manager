@@ -2,6 +2,7 @@
 VM Service Layer
 Handles all libvirt interactions and data processing.
 """
+
 from __future__ import annotations
 
 import logging
@@ -249,8 +250,7 @@ class VMService:
         if self._message_callback:
             self._message_callback(
                 "warning",
-                f"Connection to {uri} lost: {reason_str}. "
-                "Attempting to reconnect...",
+                f"Connection to {uri} lost: {reason_str}. " "Attempting to reconnect...",
             )
 
         # Clean up event callbacks tracking

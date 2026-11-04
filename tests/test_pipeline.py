@@ -112,7 +112,7 @@ class TestPipelineCommands(unittest.TestCase):
         mock_dom2 = Mock()
         mock_dom2.name.return_value = "vm2"
         mock_dom2.UUIDString.return_value = "uuid2"
-        
+
         mock_conn.listAllDomains.return_value = [mock_dom1, mock_dom2]
         mock_conn.getURI.return_value = "test:///default"
         self.mock_cli.active_connections = {"default": mock_conn}
@@ -210,8 +210,10 @@ class TestPipelineCommands(unittest.TestCase):
         errors = cmd.validate(self.context, self.mock_vm_service, self.mock_cli)
         self.assertEqual(errors, [])
 
-        with patch("vmanager.pipeline.remote_viewer_cmd") as mock_rv_cmd, \
-             patch("subprocess.Popen") as mock_popen:
+        with (
+            patch("vmanager.pipeline.remote_viewer_cmd") as mock_rv_cmd,
+            patch("subprocess.Popen") as mock_popen,
+        ):
             mock_rv_cmd.return_value = ["echo", "viewer"]
             cmd.execute(self.context, self.mock_vm_service, self.mock_cli)
             self.assertTrue(mock_popen.called)
@@ -291,7 +293,7 @@ class TestPipelineExecutor(unittest.TestCase):
     def setUp(self):
         self.mock_vm_service = Mock()
         self.mock_cli = Mock()
-        
+
         # Mock connection and domains
         mock_conn = Mock()
         mock_dom1 = Mock()
@@ -300,7 +302,7 @@ class TestPipelineExecutor(unittest.TestCase):
         mock_dom2 = Mock()
         mock_dom2.name.return_value = "vm2"
         mock_dom2.UUIDString.return_value = "uuid2"
-        
+
         mock_conn.listAllDomains.return_value = [mock_dom1, mock_dom2]
         mock_conn.getURI.return_value = "test:///default"
         self.mock_cli.active_connections = {"default": mock_conn}
@@ -309,8 +311,10 @@ class TestPipelineExecutor(unittest.TestCase):
 
     def test_simple_pipeline_execution(self):
         """Test executing a simple pipeline."""
-        with patch("vmanager.pipeline.remote_viewer_cmd") as mock_rv_cmd, \
-             patch("subprocess.Popen") as mock_popen:
+        with (
+            patch("vmanager.pipeline.remote_viewer_cmd") as mock_rv_cmd,
+            patch("subprocess.Popen") as mock_popen,
+        ):
             mock_rv_cmd.return_value = ["echo", "viewer"]
             context = self.executor.execute_pipeline("select vm1 vm2 | view")
 
@@ -341,9 +345,11 @@ class TestPipelineExecutor(unittest.TestCase):
 
     def test_pipeline_execution_with_wait(self):
         """Test pipeline with wait command."""
-        with patch("time.sleep") as mock_sleep, \
-             patch("vmanager.pipeline.remote_viewer_cmd") as mock_rv_cmd, \
-             patch("subprocess.Popen") as mock_popen:
+        with (
+            patch("time.sleep") as mock_sleep,
+            patch("vmanager.pipeline.remote_viewer_cmd") as mock_rv_cmd,
+            patch("subprocess.Popen") as mock_popen,
+        ):
             mock_rv_cmd.return_value = ["echo", "viewer"]
             context = self.executor.execute_pipeline("select vm1 | wait 1 | view")
 
@@ -362,7 +368,7 @@ class TestIntegration(unittest.TestCase):
     def setUp(self):
         self.mock_vm_service = Mock()
         self.mock_cli = Mock()
-        
+
         # Mock connection and domains
         mock_conn = Mock()
         mock_dom1 = Mock()
@@ -371,7 +377,7 @@ class TestIntegration(unittest.TestCase):
         mock_dom2 = Mock()
         mock_dom2.name.return_value = "web2"
         mock_dom2.UUIDString.return_value = "uuid2"
-        
+
         mock_conn.listAllDomains.return_value = [mock_dom1, mock_dom2]
         mock_conn.getURI.return_value = "test:///default"
         self.mock_cli.active_connections = {"default": mock_conn}

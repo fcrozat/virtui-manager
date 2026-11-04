@@ -87,4 +87,4 @@ class ConfigManager:
             return False
 
 
-__all__ = ['ConfigManager']
+__all__ = ["ConfigManager"]

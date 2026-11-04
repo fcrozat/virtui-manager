@@ -9,4 +9,4 @@ functionality, organized into focused modules for better testability and reuse.
 
 from .viewer_app import RemoteViewer, main
 
-__all__ = ['RemoteViewer', 'main']
+__all__ = ["RemoteViewer", "main"]

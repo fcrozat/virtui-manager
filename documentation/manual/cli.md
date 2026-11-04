@@ -606,7 +606,8 @@ $ vmc --machine -c "pool create sidekick --path /srv/sidekick"
 | `volume list --pool P` / `volume info --pool P --name V` | volumes with their size, format and path. |
 | `volume upload --pool P --name V --file F [--format raw\|qcow2] [--force]` | the volume, with the bytes it wrote. Streams; a whole image is never in memory. |
 | `volume create-overlay --pool P --name V --backing B [--size GB] [--force]` | the new volume, whose backing file is `B`. |
-| `volume delete --pool P --name V [--force]` / `volume rename --pool P --name V --new-name W [--force]` | what happened to the volume. |
+| `volume delete --pool P --name V [--force]` | what happened to the volume. |
+| `volume rename --pool P --name V --new-name W [--force]` | status 9, and the reason: the libvirt binding cannot rename a volume. |
 | `domain list [--prefix X]` | the domains and their state; `--prefix` keeps the names that start with it. |
 | `domain state <name>` | whether it runs, and whether libvirt has it at all. |
 | `domain address <name>` | its lease address, `ipv4` null when it has none yet. |
@@ -619,8 +620,8 @@ $ vmc --machine -c "pool create sidekick --path /srv/sidekick"
 `--force` takes no value: written means yes, and `--force yes` is a bad argument
 (status 2) rather than a yes. Where it is offered it means the name is the
 caller's to overwrite — `upload` and `create-overlay` delete the volume standing
-on the name and make the new one in its place, `rename` does the same to the name
-being moved onto, and without it a name in use is status 6. A flag the command
+on the name and make the new one in its place — and without it a name in use is
+status 6. A flag the command
 has never heard of is status 2 too, naming the flag.
 
 `volume delete` will not remove a volume a running machine is using — that is
@@ -681,6 +682,10 @@ command that ran and failed: a command gains a machine-readable result one at
 a time, and until then it is reported as unsupported rather than as a success
 with an empty payload. A word that is not a command at all is status 2, not 9.
 `machine info` lists the commands this vmc answers to.
+
+`volume rename` is a status 9 that will not change: the libvirt binding has no
+way to rename a volume, so the message says so and names `virsh vol-rename` as
+the way that does work, rather than failing as an unknown error.
 
 ## Advanced Tools
 

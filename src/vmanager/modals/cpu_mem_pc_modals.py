@@ -1,6 +1,7 @@
 """
 CPU MEM Machine type modals
 """
+
 from __future__ import annotations
 
 from textual.app import ComposeResult

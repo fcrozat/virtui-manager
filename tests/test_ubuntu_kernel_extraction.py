@@ -29,12 +29,12 @@ def test_ubuntu_kernel_paths():
         expected_kernel_path = os.path.join(tmp_dir, "casper", "vmlinuz")
         expected_initrd_path = os.path.join(tmp_dir, "casper", "initrd")
 
-        assert os.path.exists(expected_kernel_path), (
-            f"Kernel path doesn't exist: {expected_kernel_path}"
-        )
-        assert os.path.exists(expected_initrd_path), (
-            f"Initrd path doesn't exist: {expected_initrd_path}"
-        )
+        assert os.path.exists(
+            expected_kernel_path
+        ), f"Kernel path doesn't exist: {expected_kernel_path}"
+        assert os.path.exists(
+            expected_initrd_path
+        ), f"Initrd path doesn't exist: {expected_initrd_path}"
 
         print(f"PASS Ubuntu kernel path: {expected_kernel_path}")
         print(f"PASS Ubuntu initrd path: {expected_initrd_path}")
@@ -48,12 +48,12 @@ def test_ubuntu_kernel_paths():
         alt_expected_kernel = os.path.join(tmp_dir, "casper", "vmlinuz-generic")
         alt_expected_initrd = os.path.join(tmp_dir, "casper", "initrd-generic")
 
-        assert os.path.exists(alt_expected_kernel), (
-            f"Alt kernel path doesn't exist: {alt_expected_kernel}"
-        )
-        assert os.path.exists(alt_expected_initrd), (
-            f"Alt initrd path doesn't exist: {alt_expected_initrd}"
-        )
+        assert os.path.exists(
+            alt_expected_kernel
+        ), f"Alt kernel path doesn't exist: {alt_expected_kernel}"
+        assert os.path.exists(
+            alt_expected_initrd
+        ), f"Alt initrd path doesn't exist: {alt_expected_initrd}"
 
         print(f"PASS Ubuntu alternative kernel path: {alt_expected_kernel}")
         print(f"PASS Ubuntu alternative initrd path: {alt_expected_initrd}")
@@ -79,12 +79,12 @@ def test_opensuse_kernel_paths():
         expected_kernel_path = os.path.join(tmp_dir, "boot", "x86_64", "loader", "linux")
         expected_initrd_path = os.path.join(tmp_dir, "boot", "x86_64", "loader", "initrd")
 
-        assert os.path.exists(expected_kernel_path), (
-            f"Kernel path doesn't exist: {expected_kernel_path}"
-        )
-        assert os.path.exists(expected_initrd_path), (
-            f"Initrd path doesn't exist: {expected_initrd_path}"
-        )
+        assert os.path.exists(
+            expected_kernel_path
+        ), f"Kernel path doesn't exist: {expected_kernel_path}"
+        assert os.path.exists(
+            expected_initrd_path
+        ), f"Initrd path doesn't exist: {expected_initrd_path}"
 
         print(f"PASS openSUSE kernel path: {expected_kernel_path}")
         print(f"PASS openSUSE initrd path: {expected_initrd_path}")
@@ -121,15 +121,15 @@ def test_template_detection():
 
         is_ubuntu_preseed = is_ubuntu_template and not is_ubuntu_autoinstall
 
-        assert is_ubuntu_template == exp_ubuntu, (
-            f"Ubuntu template detection failed for {template_name}: expected {exp_ubuntu}, got {is_ubuntu_template}"
-        )
-        assert is_ubuntu_autoinstall == exp_autoinstall, (
-            f"Ubuntu autoinstall detection failed for {template_name}: expected {exp_autoinstall}, got {is_ubuntu_autoinstall}"
-        )
-        assert is_ubuntu_preseed == exp_preseed, (
-            f"Ubuntu preseed detection failed for {template_name}: expected {exp_preseed}, got {is_ubuntu_preseed}"
-        )
+        assert (
+            is_ubuntu_template == exp_ubuntu
+        ), f"Ubuntu template detection failed for {template_name}: expected {exp_ubuntu}, got {is_ubuntu_template}"
+        assert (
+            is_ubuntu_autoinstall == exp_autoinstall
+        ), f"Ubuntu autoinstall detection failed for {template_name}: expected {exp_autoinstall}, got {is_ubuntu_autoinstall}"
+        assert (
+            is_ubuntu_preseed == exp_preseed
+        ), f"Ubuntu preseed detection failed for {template_name}: expected {exp_preseed}, got {is_ubuntu_preseed}"
 
         print(
             f"PASS {template_name}: ubuntu={is_ubuntu_template}, autoinstall={is_ubuntu_autoinstall}, preseed={is_ubuntu_preseed}"

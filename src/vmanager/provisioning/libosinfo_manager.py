@@ -36,7 +36,7 @@ class LibosinfoManager:
         for i in range(os_list.get_length()):
             os_info = os_list.get_nth(i)
             short_id = os_info.get_short_id()
-            
+
             # Skip duplicates and unknown versions
             version_num = os_info.get_version()
             if not version_num or version_num.lower() == "unknown" or short_id in seen_ids:
@@ -50,13 +50,13 @@ class LibosinfoManager:
                 if media.get_url() and media.get_architecture() == self.host_arch:
                     has_media_url = True
                     break
-            
+
             if not has_media_url:
                 continue
 
             # Determine OSType
             os_type = self._map_to_os_type(os_info)
-            
+
             # Get EOL date
             eol_date = None
             try:
@@ -70,13 +70,14 @@ class LibosinfoManager:
                     version_id=version_num,
                     display_name=os_info.get_name(),
                     architecture=self.host_arch,
-                    eol_date=eol_date
+                    eol_date=eol_date,
                 )
             )
             seen_ids.add(short_id)
 
         # Sort: Primary sort by distribution (alphabetical), secondary sort by version (latest first)
         import re
+
         def natural_sort_key(s):
             return [int(text) if text.isdigit() else text.lower() for text in re.split(r"(\d+)", s)]
 
@@ -98,7 +99,7 @@ class LibosinfoManager:
             if info.get_name() == version.display_name and info.get_version() == version.version_id:
                 os_info = info
                 break
-        
+
         if not os_info:
             return []
 
@@ -108,18 +109,20 @@ class LibosinfoManager:
             media = media_list.get_nth(i)
             url = media.get_url()
             arch = media.get_architecture()
-            
+
             if url and (not arch or arch == self.host_arch):
                 # Extract filename from URL
                 filename = url.split("/")[-1]
-                results.append({
-                    "name": f"{version.display_name} ({arch}) - {filename}",
-                    "url": url,
-                    "arch": arch,
-                    "size": "Unknown", # Libosinfo doesn't reliably provide size
-                    "date": ""         # Nor last-modified date
-                })
-        
+                results.append(
+                    {
+                        "name": f"{version.display_name} ({arch}) - {filename}",
+                        "url": url,
+                        "arch": arch,
+                        "size": "Unknown",  # Libosinfo doesn't reliably provide size
+                        "date": "",  # Nor last-modified date
+                    }
+                )
+
         return sorted(results, key=lambda x: x["name"])
 
     def _map_to_os_type(self, os_info) -> OSType:
@@ -145,5 +148,5 @@ class LibosinfoManager:
             return OSType.ALPINE
         if "win" in short_id:
             return OSType.WINDOWS
-        
+
         return OSType.LINUX

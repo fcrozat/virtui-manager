@@ -1,6 +1,7 @@
 """
 Network Hypervisor and guest side
 """
+
 from __future__ import annotations
 
 import ipaddress
@@ -19,7 +20,12 @@ from ..network_manager import (
     suggest_free_subnet,
 )
 from .base_modals import BaseDialog, BaseModal
-from .input_modals import _sanitize_domain_name, _sanitize_input, validate_mac_address, validate_ip_or_cidr
+from .input_modals import (
+    _sanitize_domain_name,
+    _sanitize_input,
+    validate_mac_address,
+    validate_ip_or_cidr,
+)
 from typing import Optional
 
 
@@ -246,9 +252,7 @@ class AddEditNetworkModal(BaseModal[None]):
                             id="net-ip-input",
                             value=ip_val,
                         )
-                        yield Checkbox(
-                            StaticText.ENABLE_DHCPV4, id="dhcp-checkbox", value=dhcp_val
-                        )
+                        yield Checkbox(StaticText.ENABLE_DHCPV4, id="dhcp-checkbox", value=dhcp_val)
                         dhcp_options_classes = "" if dhcp_val else "hidden"
                         with Horizontal(id="dhcp-options", classes=dhcp_options_classes):
                             yield Input(
@@ -493,7 +497,9 @@ class AddEditNetworkModal(BaseModal[None]):
                         validate_ip_or_cidr(dhcp_start)
                     except ValueError:
                         self.app.show_error_message(
-                            ErrorMessages.INVALID_IP_OR_NETWORK_TEMPLATE.format(error="DHCP start IP invalid")
+                            ErrorMessages.INVALID_IP_OR_NETWORK_TEMPLATE.format(
+                                error="DHCP start IP invalid"
+                            )
                         )
                         return
                 if dhcp_end:
@@ -501,7 +507,9 @@ class AddEditNetworkModal(BaseModal[None]):
                         validate_ip_or_cidr(dhcp_end)
                     except ValueError:
                         self.app.show_error_message(
-                            ErrorMessages.INVALID_IP_OR_NETWORK_TEMPLATE.format(error="DHCP end IP invalid")
+                            ErrorMessages.INVALID_IP_OR_NETWORK_TEMPLATE.format(
+                                error="DHCP end IP invalid"
+                            )
                         )
                         return
 
@@ -530,10 +538,7 @@ class AddEditNetworkModal(BaseModal[None]):
                         if dhcp:
                             dhcp_start_ip = ipaddress.ip_address(dhcp_start)
                             dhcp_end_ip = ipaddress.ip_address(dhcp_end)
-                            if (
-                                dhcp_start_ip not in ip_network
-                                or dhcp_end_ip not in ip_network
-                            ):
+                            if dhcp_start_ip not in ip_network or dhcp_end_ip not in ip_network:
                                 self.app.show_error_message(
                                     ErrorMessages.DHCP_IPS_NOT_IN_NETWORK_TEMPLATE.format(
                                         network=ip_network

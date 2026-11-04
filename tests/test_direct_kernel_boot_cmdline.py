@@ -192,17 +192,20 @@ class TestDirectKernelBootCmdline(unittest.TestCase):
             )
 
             # Every OS should have a cmdline when using direct kernel boot
-            self.assertIn("<cmdline>", xml,
-                f"{os_type.value} should have cmdline with direct kernel boot")
+            self.assertIn(
+                "<cmdline>", xml, f"{os_type.value} should have cmdline with direct kernel boot"
+            )
 
             # Cmdline should not be empty
             import re
-            cmdline_match = re.search(r'<cmdline>(.*?)</cmdline>', xml, re.DOTALL)
-            self.assertIsNotNone(cmdline_match,
-                f"{os_type.value} cmdline tag should exist")
+
+            cmdline_match = re.search(r"<cmdline>(.*?)</cmdline>", xml, re.DOTALL)
+            self.assertIsNotNone(cmdline_match, f"{os_type.value} cmdline tag should exist")
             cmdline_content = cmdline_match.group(1).strip()
-            self.assertTrue(len(cmdline_content) > 0,
-                f"{os_type.value} cmdline should not be empty, got: '{cmdline_content}'")
+            self.assertTrue(
+                len(cmdline_content) > 0,
+                f"{os_type.value} cmdline should not be empty, got: '{cmdline_content}'",
+            )
 
             print(f"✓ {os_type.value}: has non-empty cmdline")
 
@@ -235,9 +238,9 @@ if __name__ == "__main__":
     result = runner.run(suite)
 
     if result.wasSuccessful():
-        print("\n" + "="*70)
+        print("\n" + "=" * 70)
         print("✓ All tests passed!")
-        print("="*70)
+        print("=" * 70)
         print("\nFix Summary:")
         print("  • Ubuntu: boot=casper parameters added")
         print("  • Debian: boot=live parameters added")
@@ -248,7 +251,7 @@ if __name__ == "__main__":
         print("\nAll distributions now boot correctly with direct kernel boot!")
         sys.exit(0)
     else:
-        print("\n" + "="*70)
+        print("\n" + "=" * 70)
         print("✗ Some tests failed")
-        print("="*70)
+        print("=" * 70)
         sys.exit(1)

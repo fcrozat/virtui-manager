@@ -9,9 +9,12 @@ without libvirt answering. What the fake does answer is the shape the real
 libvirt returns, so a change in one of them shows up here.
 """
 
+import ast
 import io
 import json
 import unittest
+from collections import defaultdict
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import libvirt
@@ -108,7 +111,6 @@ class FakeVolume:
         self.fmt = fmt
         self.capacity = capacity
         self.deleted_with = None
-        self.renamed_to = None
 
     def name(self):
         return self._name
@@ -129,9 +131,6 @@ class FakeVolume:
 
     def delete(self, flags=0):
         self.deleted_with = flags
-
-    def rename(self, new_name, _flags=0):
-        self.renamed_to = new_name
 
     def upload(self, stream, _offset, _length):
         self.stream = stream
@@ -537,12 +536,16 @@ class VolumeCommandTest(unittest.TestCase):
         answer(self.conn, "volume delete --pool default --name base.qcow2")
         self.assertEqual(self.pool.volumes["base.qcow2"].deleted_with, 0)
 
-    def test_rename_moves_it(self):
-        result = answer(
-            self.conn, "volume rename --pool default --name base.qcow2 --new-name other.qcow2"
-        )
-        self.assertEqual(self.pool.volumes["base.qcow2"].renamed_to, "other.qcow2")
-        self.assertEqual(result["name"], "other.qcow2")
+    def test_rename_is_answered_as_impossible_rather_than_attempted(self):
+        """libvirt-python has no way to rename a volume, so saying yes would be a
+        lie and calling the method, a crash."""
+        with self.assertRaises(MachineError) as raised:
+            answer(
+                self.conn, "volume rename --pool default --name base.qcow2 --new-name other.qcow2"
+            )
+        self.assertEqual(raised.exception.status, 9)
+        self.assertEqual(raised.exception.code, "unsupported")
+        self.assertIn("vol-rename", str(raised.exception))
 
 
 class DomainCommandTest(unittest.TestCase):
@@ -647,19 +650,6 @@ class DomainCommandTest(unittest.TestCase):
             answer(self.conn, "domain shutdown quiet")
         self.assertEqual(raised.exception.status, EXIT_OPERATION)
 
-    @unittest.skipUnless(
-        isinstance(getattr(libvirt, "VIR_ERR_NO_DOMAIN", None), int),
-        "needs the real libvirt binding, whose constants are numbers",
-    )
-    def test_the_domain_commands_only_use_methods_the_binding_has(self):
-        """A fake is free to invent a method the binding does not have; the
-        hypervisor is not, so the names are checked against the real thing."""
-        for method in ("create", "shutdown", "reboot", "destroy", "undefineFlags"):
-            self.assertTrue(
-                hasattr(libvirt.virDomain, method),
-                f"libvirt.virDomain has no {method}()",
-            )
-
     def test_a_running_machine_is_not_undone(self):
         with self.assertRaises(MachineError) as raised:
             answer(self.conn, "domain undefine sidekick-vm")
@@ -671,24 +661,43 @@ class DomainCommandTest(unittest.TestCase):
         self.assertEqual(self.conn.domains["quiet"].actions, ["undefine"])
 
 
+class FakeNetwork:
+    """A network, written out so it answers only what the binding answers."""
+
+    def __init__(self, name, active=1, bridge="virbr0", autostart=1):
+        self._name = name
+        self._active = active
+        self._bridge = bridge
+        self._autostart = autostart
+
+    def name(self):
+        return self._name
+
+    def isActive(self):  # pylint: disable=invalid-name
+        return self._active
+
+    def XMLDesc(self, _flags=0):  # pylint: disable=invalid-name
+        return f"<network><bridge name='{self._bridge}'/></network>"
+
+    def autostart(self):
+        return self._autostart
+
+
 class NetworkAndHostTest(unittest.TestCase):
     def setUp(self):
         self.conn = FakeConnection()
-        self.conn.networks["default"] = MagicMock()
-        self.conn.networks["default"].name.return_value = "default"
-        self.conn.networks["default"].isActive.return_value = 1
-        self.conn.networks["default"].XMLDesc.return_value = (
-            "<network><bridge name='virbr0'/></network>"
-        )
+        self.conn.networks["default"] = FakeNetwork("default")
 
     def test_network_list_reports_what_is_there(self):
         result = answer(self.conn, "network list")
         self.assertEqual(result["networks"][0]["name"], "default")
         self.assertEqual(result["networks"][0]["state"], "active")
 
-    def test_network_info_names_the_bridge(self):
+    def test_network_info_names_the_bridge_and_the_flags(self):
         result = answer(self.conn, "network info default")
         self.assertEqual(result["bridge"], "virbr0")
+        self.assertEqual(result["state"], "active")
+        self.assertTrue(result["autostart"])
 
     def test_capabilities_say_what_can_run_here(self):
         result = answer(self.conn, "host capabilities")
@@ -758,7 +767,7 @@ class CacheInvalidationTest(unittest.TestCase):
                 "volume create-overlay --pool default --name child.qcow2 --backing base.qcow2"
             ),
             "delete": "volume delete --pool default --name base.qcow2",
-            "rename": "volume rename --pool default --name base.qcow2 --new-name newer.qcow2",
+            # `rename` is not here: it changes nothing, so it has nothing to forget.
         }
         for name, command in commands.items():
             with self.subTest(command=name):
@@ -796,6 +805,57 @@ class CacheInvalidationTest(unittest.TestCase):
         with self.assertRaises(MachineError):
             self.quiet_run(app, "domain start nosuch")
         app.vm_service.invalidate_vm_state_cache.assert_not_called()
+
+
+class TestTheCommandsOnlyUseMethodsTheBindingHas(unittest.TestCase):
+    """The names the resource commands call on libvirt objects, looked up on the
+    binding itself.
+
+    A fake is free to invent a method, so a test written against one can stay
+    green while the command crashes on a real hypervisor: `poweroff`,
+    `getAutostart` and `rename` were all called by commands whose tests passed.
+    So the names are read out of this module's own source here and checked
+    against the classes they belong to. Which class is decided by the name the
+    code gives the variable — `pool`, `vol`, `network`, `domain`, `conn`,
+    `stream` — a convention these commands keep.
+    """
+
+    CLASSES_BY_VARIABLE = {
+        "pool": "virStoragePool",
+        "vol": "virStorageVol",
+        "volume": "virStorageVol",
+        "backing": "virStorageVol",
+        "network": "virNetwork",
+        "net": "virNetwork",
+        "domain": "virDomain",
+        "conn": "virConnect",
+        "stream": "virStream",
+    }
+
+    @unittest.skipUnless(
+        isinstance(getattr(libvirt, "VIR_ERR_NO_DOMAIN", None), int),
+        "needs the real libvirt binding, whose constants are numbers",
+    )
+    def test_every_libvirt_method_a_command_calls_exists(self):
+        source = Path(__file__).resolve().parents[1] / "src" / "vmanager" / "machine_resources.py"
+        called = defaultdict(set)
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+            target = node.func if isinstance(node, ast.Call) else None
+            if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
+                class_name = self.CLASSES_BY_VARIABLE.get(target.value.id)
+                if class_name:
+                    called[class_name].add(target.attr)
+        absent = {
+            class_name: sorted(
+                name for name in names if not hasattr(getattr(libvirt, class_name), name)
+            )
+            for class_name, names in sorted(called.items())
+        }
+        self.assertEqual(
+            {name: missing for name, missing in absent.items() if missing},
+            {},
+            "these commands call libvirt methods the binding does not have",
+        )
 
 
 if __name__ == "__main__":

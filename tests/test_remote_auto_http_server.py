@@ -1,4 +1,5 @@
 """Tests for RemoteAutoHTTPServer."""
+
 import errno
 import os
 import sys
@@ -7,9 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # Add the src directory to the path to import vmanager modules
-sys.path.insert(
-    0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
-)
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 from vmanager.auto_http_server import RemoteAutoHTTPServer
 
 
@@ -36,11 +35,13 @@ class TestRemoteAutoHTTPServer:
         (serve_dir / "autoinst.json").write_text('{"test": true}')
 
         with patch("vmanager.auto_http_server.subprocess.run") as mock_run:
-            mock_run.side_effect = _start_sequence([
-                _mock_completed(),  # base64 push
-                _mock_completed(),  # start server
-                _mock_completed(),  # verify
-            ])
+            mock_run.side_effect = _start_sequence(
+                [
+                    _mock_completed(),  # base64 push
+                    _mock_completed(),  # start server
+                    _mock_completed(),  # verify
+                ]
+            )
             server = RemoteAutoHTTPServer(serve_dir, port=8000, remote_host="user@host")
             port = server.start()
             assert port == 8000
@@ -53,11 +54,13 @@ class TestRemoteAutoHTTPServer:
         (serve_dir / "autoinst.json").write_text("{}")
 
         with patch("vmanager.auto_http_server.subprocess.run") as mock_run:
-            mock_run.side_effect = _start_sequence([
-                _mock_completed(),  # base64 push
-                _mock_completed(),  # start server
-                _mock_completed(),  # verify
-            ])
+            mock_run.side_effect = _start_sequence(
+                [
+                    _mock_completed(),  # base64 push
+                    _mock_completed(),  # start server
+                    _mock_completed(),  # verify
+                ]
+            )
             server = RemoteAutoHTTPServer(serve_dir, port=8000, remote_host="user@host")
             server.start()
             # The kill-existing call is the 2nd call (index 1)
@@ -73,11 +76,13 @@ class TestRemoteAutoHTTPServer:
         (serve_dir / "autoinst.json").write_text("{}")
 
         with patch("vmanager.auto_http_server.subprocess.run") as mock_run:
-            mock_run.side_effect = _start_sequence([
-                _mock_completed(),  # base64 push
-                _mock_completed(),  # start server
-                _mock_completed(),  # verify
-            ])
+            mock_run.side_effect = _start_sequence(
+                [
+                    _mock_completed(),  # base64 push
+                    _mock_completed(),  # start server
+                    _mock_completed(),  # verify
+                ]
+            )
             server = RemoteAutoHTTPServer(serve_dir, port=8000, remote_host="user@host")
             server.start()
             # The start command is the 5th call (index 4)
@@ -106,14 +111,19 @@ class TestRemoteAutoHTTPServer:
         (serve_dir / "autoinst.json").write_text("{}")
 
         with patch("vmanager.auto_http_server.subprocess.run") as mock_run:
-            mock_run.side_effect = _start_sequence([
-                _mock_completed(),  # base64 push
-                _mock_completed(),  # start server
-            ] + [
-                _mock_completed(returncode=1),  # verify (x10): pid dead / port not ours
-            ] * 10 + [
-                _mock_completed(returncode=0),  # grep 'Address already in use' in log
-            ])
+            mock_run.side_effect = _start_sequence(
+                [
+                    _mock_completed(),  # base64 push
+                    _mock_completed(),  # start server
+                ]
+                + [
+                    _mock_completed(returncode=1),  # verify (x10): pid dead / port not ours
+                ]
+                * 10
+                + [
+                    _mock_completed(returncode=0),  # grep 'Address already in use' in log
+                ]
+            )
             server = RemoteAutoHTTPServer(serve_dir, port=8000, remote_host="user@host")
             with pytest.raises(OSError) as exc_info:
                 server.start()
@@ -128,14 +138,19 @@ class TestRemoteAutoHTTPServer:
         with patch("vmanager.auto_http_server.subprocess.run") as mock_run:
             # verify loop: first 9 attempts fail (orphan holds port, our pid dead),
             # 10th attempt our pid is alive and port is up
-            mock_run.side_effect = _start_sequence([
-                _mock_completed(),  # base64 push
-                _mock_completed(),  # start server
-            ] + [
-                _mock_completed(returncode=1),  # verify attempts 1-9
-            ] * 9 + [
-                _mock_completed(returncode=0),  # verify attempt 10: our pid alive + port up
-            ])
+            mock_run.side_effect = _start_sequence(
+                [
+                    _mock_completed(),  # base64 push
+                    _mock_completed(),  # start server
+                ]
+                + [
+                    _mock_completed(returncode=1),  # verify attempts 1-9
+                ]
+                * 9
+                + [
+                    _mock_completed(returncode=0),  # verify attempt 10: our pid alive + port up
+                ]
+            )
             server = RemoteAutoHTTPServer(serve_dir, port=8000, remote_host="user@host")
             port = server.start()
             assert port == 8000
@@ -147,14 +162,19 @@ class TestRemoteAutoHTTPServer:
         (serve_dir / "autoinst.json").write_text("{}")
 
         with patch("vmanager.auto_http_server.subprocess.run") as mock_run:
-            mock_run.side_effect = _start_sequence([
-                _mock_completed(),  # base64 push
-                _mock_completed(),  # start server
-            ] + [
-                _mock_completed(returncode=1),  # verify (x10, port never up)
-            ] * 10 + [
-                _mock_completed(returncode=1),  # grep 'Address already in use' not found
-            ])
+            mock_run.side_effect = _start_sequence(
+                [
+                    _mock_completed(),  # base64 push
+                    _mock_completed(),  # start server
+                ]
+                + [
+                    _mock_completed(returncode=1),  # verify (x10, port never up)
+                ]
+                * 10
+                + [
+                    _mock_completed(returncode=1),  # grep 'Address already in use' not found
+                ]
+            )
             server = RemoteAutoHTTPServer(serve_dir, port=8000, remote_host="user@host")
             with pytest.raises(Exception, match="failed to start"):
                 server.start()
@@ -165,12 +185,14 @@ class TestRemoteAutoHTTPServer:
         (serve_dir / "autoinst.json").write_text("{}")
 
         with patch("vmanager.auto_http_server.subprocess.run") as mock_run:
-            mock_run.side_effect = _start_sequence([
-                _mock_completed(),  # base64 push
-                _mock_completed(),  # start server
-                _mock_completed(stdout="8080\n"),  # grep port from log
-                _mock_completed(),  # verify
-            ])
+            mock_run.side_effect = _start_sequence(
+                [
+                    _mock_completed(),  # base64 push
+                    _mock_completed(),  # start server
+                    _mock_completed(stdout="8080\n"),  # grep port from log
+                    _mock_completed(),  # verify
+                ]
+            )
             server = RemoteAutoHTTPServer(serve_dir, port=0, remote_host="user@host")
             port = server.start()
             assert port == 8080
@@ -179,14 +201,16 @@ class TestRemoteAutoHTTPServer:
         serve_dir = tmp_path / "auto"
         serve_dir.mkdir()
         with patch("vmanager.auto_http_server.subprocess.run") as mock_run:
-            mock_run.side_effect = _start_sequence([
-                _mock_completed(),  # base64 push
-                _mock_completed(),  # start server
-                _mock_completed(),  # verify
-                _mock_completed(),  # stop: kill
-                _mock_completed(),  # stop: rm -rf
-                _mock_completed(),  # stop: ssh ControlMaster exit
-            ])
+            mock_run.side_effect = _start_sequence(
+                [
+                    _mock_completed(),  # base64 push
+                    _mock_completed(),  # start server
+                    _mock_completed(),  # verify
+                    _mock_completed(),  # stop: kill
+                    _mock_completed(),  # stop: rm -rf
+                    _mock_completed(),  # stop: ssh ControlMaster exit
+                ]
+            )
             server = RemoteAutoHTTPServer(serve_dir, port=8000, remote_host="user@host")
             server.start()
             server.stop()
@@ -216,14 +240,16 @@ class TestRemoteAutoHTTPServer:
         serve_dir.mkdir()
         (serve_dir / "autoinst.json").write_text("{}")
         with patch("vmanager.auto_http_server.subprocess.run") as mock_run:
-            mock_run.side_effect = _start_sequence([
-                _mock_completed(),  # base64 push
-                _mock_completed(),  # start server
-                _mock_completed(),  # verify
-                _mock_completed(),  # stop: kill
-                _mock_completed(),  # stop: rm -rf
-                _mock_completed(),  # stop: ssh ControlMaster exit
-            ])
+            mock_run.side_effect = _start_sequence(
+                [
+                    _mock_completed(),  # base64 push
+                    _mock_completed(),  # start server
+                    _mock_completed(),  # verify
+                    _mock_completed(),  # stop: kill
+                    _mock_completed(),  # stop: rm -rf
+                    _mock_completed(),  # stop: ssh ControlMaster exit
+                ]
+            )
             with RemoteAutoHTTPServer(serve_dir, port=8000, remote_host="user@host") as server:
                 assert server.actual_port == 8000
             assert server.actual_port is None

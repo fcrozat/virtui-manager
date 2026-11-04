@@ -11,6 +11,7 @@ from typing import Optional, Callable
 
 import gi
 import libvirt
+
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, GLib
 
@@ -24,9 +25,14 @@ class USBTab:
     Provides USB device attach/detach for VM passthrough.
     """
 
-    def __init__(self, domain, conn, window=None,
-                 log_callback: Optional[Callable[[str], None]] = None,
-                 notification_callback: Optional[Callable[[str, Gtk.MessageType], None]] = None):
+    def __init__(
+        self,
+        domain,
+        conn,
+        window=None,
+        log_callback: Optional[Callable[[str], None]] = None,
+        notification_callback: Optional[Callable[[str, Gtk.MessageType], None]] = None,
+    ):
         """
         Initialize the USB tab.
 
@@ -66,8 +72,7 @@ class USBTab:
 
         # Attached USB Devices section
         tab.pack_start(
-            Gtk.Label(label="<b>Attached USB Devices</b>", use_markup=True),
-            False, False, 0
+            Gtk.Label(label="<b>Attached USB Devices</b>", use_markup=True), False, False, 0
         )
 
         # ListStore: vendor_id, product_id, vendor_name, product_name, description
@@ -82,8 +87,7 @@ class USBTab:
 
         # Host USB Devices section
         tab.pack_start(
-            Gtk.Label(label="<b>Available Host USB Devices</b>", use_markup=True),
-            False, False, 0
+            Gtk.Label(label="<b>Available Host USB Devices</b>", use_markup=True), False, False, 0
         )
 
         self.host_usb_store = Gtk.ListStore(str, str, str, str, str)
@@ -150,13 +154,15 @@ class USBTab:
             root = ET.fromstring(domain_xml)
             attached_devices = vm_queries.get_attached_usb_devices(root)
             for dev in attached_devices:
-                self.attached_usb_store.append([
-                    dev.get("vendor_id", "N/A"),
-                    dev.get("product_id", "N/A"),
-                    "",  # Vendor name not in attached devices
-                    "",  # Product name not in attached devices
-                    f"{dev.get('vendor_id', '')}:{dev.get('product_id', '')}",
-                ])
+                self.attached_usb_store.append(
+                    [
+                        dev.get("vendor_id", "N/A"),
+                        dev.get("product_id", "N/A"),
+                        "",  # Vendor name not in attached devices
+                        "",  # Product name not in attached devices
+                        f"{dev.get('vendor_id', '')}:{dev.get('product_id', '')}",
+                    ]
+                )
         except libvirt.libvirtError as e:
             self.notify(f"Failed to get attached USB devices: {e}", Gtk.MessageType.ERROR)
         except Exception as e:
@@ -166,13 +172,15 @@ class USBTab:
         try:
             host_devices = libvirt_utils.get_host_usb_devices(self.conn)
             for dev in host_devices:
-                self.host_usb_store.append([
-                    dev.get("vendor_id", "N/A"),
-                    dev.get("product_id", "N/A"),
-                    dev.get("vendor_name", ""),
-                    dev.get("product_name", ""),
-                    dev.get("description", "N/A"),
-                ])
+                self.host_usb_store.append(
+                    [
+                        dev.get("vendor_id", "N/A"),
+                        dev.get("product_id", "N/A"),
+                        dev.get("vendor_name", ""),
+                        dev.get("product_name", ""),
+                        dev.get("description", "N/A"),
+                    ]
+                )
         except libvirt.libvirtError as e:
             self.notify(f"Failed to get host USB devices: {e}", Gtk.MessageType.ERROR)
         except Exception as e:
@@ -349,4 +357,4 @@ class USBTab:
             self.wait_dialog = None
 
 
-__all__ = ['USBTab']
+__all__ = ["USBTab"]

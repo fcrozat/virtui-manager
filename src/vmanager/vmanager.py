@@ -1,6 +1,7 @@
 """
 Main interface
 """
+
 from __future__ import annotations
 
 import argparse
@@ -2061,9 +2062,7 @@ class VMManagerTUI(App):
                     if err and uri not in uris_to_remove:
                         # Only show error if not already marked for removal
                         # This prevents duplicate error messages
-                        errors.append(
-                            f"Server '{server_name}': {sanitize_sensitive_data(err)}"
-                        )
+                        errors.append(f"Server '{server_name}': {sanitize_sensitive_data(err)}")
 
                 # Display collected errors
                 for error in errors:

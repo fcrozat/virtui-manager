@@ -1,6 +1,7 @@
 """
 Module for managing network-related operations for virtual machines.
 """
+
 from __future__ import annotations
 
 import ipaddress
@@ -42,18 +43,18 @@ def ensure_default_network(conn: libvirt.virConnect) -> libvirt.virNetwork | Non
             active_nets = [n for n in networks if n.isActive()]
             if active_nets:
                 return active_nets[0]
-            
+
             # If no networks are active, try to start the first one
             try:
                 networks[0].create()
                 return networks[0]
             except libvirt.libvirtError:
-                pass # Fallback to creating 'default' if we can't start existing one
+                pass  # Fallback to creating 'default' if we can't start existing one
 
         # No networks present or couldn't start existing ones, create 'default'
         name = "default"
         logging.info(f"Creating default NAT network '{name}'...")
-        
+
         # Standard libvirt default network XML
         xml = f"""
 <network>
@@ -489,10 +490,9 @@ def suggest_free_subnet(conn: libvirt.virConnect, prefix_len: int = 24) -> str:
     Returns a CIDR string like '192.168.100.0/24', or '' if none found.
     """
     existing = get_existing_subnets(conn)
-    candidates = (
-        [ipaddress.ip_network(f"192.168.{i}.0/{prefix_len}") for i in range(1, 255)]
-        + [ipaddress.ip_network(f"10.0.{i}.0/{prefix_len}") for i in range(1, 255)]
-    )
+    candidates = [ipaddress.ip_network(f"192.168.{i}.0/{prefix_len}") for i in range(1, 255)] + [
+        ipaddress.ip_network(f"10.0.{i}.0/{prefix_len}") for i in range(1, 255)
+    ]
     for candidate in candidates:
         if not any(candidate.overlaps(s) for s in existing):
             return str(candidate)

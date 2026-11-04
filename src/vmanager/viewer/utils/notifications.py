@@ -7,6 +7,7 @@ Handles all user notifications, error dialogs, and logging functionality.
 import time
 
 import gi
+
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, GLib
 
@@ -197,4 +198,4 @@ class NotificationManager:
         return sanitize_sensitive_data(message)
 
 
-__all__ = ['NotificationManager']
+__all__ = ["NotificationManager"]

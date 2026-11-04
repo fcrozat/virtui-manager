@@ -4,6 +4,7 @@ Automation Engine for VirtUI Manager.
 This module centralizes the generation of unattended installation files
 (Kickstart, Preseed, AutoYaST, Cloud-init, etc.) for all supported operating systems.
 """
+
 from __future__ import annotations
 
 import json
@@ -37,17 +38,29 @@ class AutomationEngine:
         self.logger.info(f"Generating automation file for {os_type.value} ({version_id})")
 
         if os_type == OSType.FEDORA:
-            return self._generate_fedora(version_id, vm_name, user_config, output_path, template_name)
+            return self._generate_fedora(
+                version_id, vm_name, user_config, output_path, template_name
+            )
         elif os_type == OSType.UBUNTU:
-            return self._generate_ubuntu(version_id, vm_name, user_config, output_path, template_name)
+            return self._generate_ubuntu(
+                version_id, vm_name, user_config, output_path, template_name
+            )
         elif os_type == OSType.DEBIAN:
-            return self._generate_debian(version_id, vm_name, user_config, output_path, template_name)
+            return self._generate_debian(
+                version_id, vm_name, user_config, output_path, template_name
+            )
         elif os_type == OSType.OPENSUSE:
-            return self._generate_opensuse(version_id, vm_name, user_config, output_path, template_name)
+            return self._generate_opensuse(
+                version_id, vm_name, user_config, output_path, template_name
+            )
         elif os_type == OSType.ARCHLINUX:
-            return self._generate_archlinux(version_id, vm_name, user_config, output_path, template_name)
+            return self._generate_archlinux(
+                version_id, vm_name, user_config, output_path, template_name
+            )
         elif os_type == OSType.ALPINE:
-            return self._generate_alpine(version_id, vm_name, user_config, output_path, template_name)
+            return self._generate_alpine(
+                version_id, vm_name, user_config, output_path, template_name
+            )
         else:
             raise NotImplementedError(f"Automation not implemented for {os_type.value}")
 
@@ -76,7 +89,9 @@ class AutomationEngine:
             content = self._generate_basic_kickstart(config)
         else:
             with open(template_path, "r", encoding="utf-8") as f:
-                content = self._substitute_variables(f.read(), config, hash_fields=["user_password", "password", "root_password"])
+                content = self._substitute_variables(
+                    f.read(), config, hash_fields=["user_password", "password", "root_password"]
+                )
 
         output_file = output_path / "ks.cfg"
         self._write_file(output_file, content)
@@ -90,22 +105,28 @@ class AutomationEngine:
         config = user_config.copy()
         config["vm_name"] = vm_name
         config.setdefault("timezone", "UTC")
-        
-        is_autoinstall = "autoinstall" in template_name.lower() or template_name.endswith((".yaml", ".yml"))
-        
+
+        is_autoinstall = "autoinstall" in template_name.lower() or template_name.endswith(
+            (".yaml", ".yml")
+        )
+
         if is_autoinstall:
             template_path = self._find_template(template_name, [".yaml", ".yml"])
             if not template_path:
                 raise FileNotFoundError(f"Ubuntu autoinstall template not found: {template_name}")
-            
+
             with open(template_path, "r", encoding="utf-8") as f:
-                content = self._substitute_variables(f.read(), config, hash_fields=["password", "user_password", "root_password"])
-            
+                content = self._substitute_variables(
+                    f.read(), config, hash_fields=["password", "user_password", "root_password"]
+                )
+
             output_file = output_path / "user-data"
             self._write_file(output_file, content)
-            
+
             # meta-data is required for cloud-init
-            meta_data = f"instance-id: {vm_name}\nlocal-hostname: {config.get('hostname', vm_name)}\n"
+            meta_data = (
+                f"instance-id: {vm_name}\nlocal-hostname: {config.get('hostname', vm_name)}\n"
+            )
             self._write_file(output_path / "meta-data", meta_data)
             return output_file
         else:
@@ -116,18 +137,20 @@ class AutomationEngine:
     def _generate_debian(self, version, vm_name, user_config, output_path, template_name):
         if not template_name:
             template_name = "preseed-basic.cfg"
-        
+
         config = user_config.copy()
         config["vm_name"] = vm_name
         config.setdefault("timezone", "UTC")
-        
+
         template_path = self._find_template(template_name, [".cfg"])
         if not template_path:
             raise FileNotFoundError(f"Preseed template not found: {template_name}")
-            
+
         with open(template_path, "r", encoding="utf-8") as f:
-            content = self._substitute_variables(f.read(), config, hash_fields=["password", "user_password"])
-        
+            content = self._substitute_variables(
+                f.read(), config, hash_fields=["password", "user_password"]
+            )
+
         output_file = output_path / "preseed.cfg"
         self._write_file(output_file, content)
         return output_file
@@ -136,11 +159,11 @@ class AutomationEngine:
     def _generate_opensuse(self, version, vm_name, user_config, output_path, template_name):
         if not template_name:
             template_name = "autoyast-basic.xml"
-        
+
         config = user_config.copy()
         config["vm_name"] = vm_name
         config.setdefault("timezone", "UTC")
-        
+
         # OpenSUSE often uses 'user_name' instead of 'username'
         if "username" in config and "user_name" not in config:
             config["user_name"] = config["username"]
@@ -158,7 +181,9 @@ class AutomationEngine:
             raise FileNotFoundError(f"OpenSUSE template not found: {template_name}")
 
         with open(template_path, "r", encoding="utf-8") as f:
-            content = self._substitute_variables(f.read(), config, hash_fields=["root_password", "user_password"])
+            content = self._substitute_variables(
+                f.read(), config, hash_fields=["root_password", "user_password"]
+            )
 
         # Apply any extra packages requested in the deployment config (openSUSE/SLES)
         packages = config.get("packages") or []
@@ -186,23 +211,23 @@ class AutomationEngine:
     def _generate_archlinux(self, version, vm_name, user_config, output_path, template_name):
         if not template_name:
             template_name = "archinstall-basic.json"
-        
+
         config = user_config.copy()
         config["vm_name"] = vm_name
         config.setdefault("timezone", "UTC")
-        
+
         template_path = self._find_template(template_name, [".json"])
         if not template_path:
-             raise FileNotFoundError(f"Arch Linux template not found: {template_name}")
+            raise FileNotFoundError(f"Arch Linux template not found: {template_name}")
 
         with open(template_path, "r", encoding="utf-8") as f:
-            # Archinstall usually takes plaintext in JSON and handles hashing itself, 
+            # Archinstall usually takes plaintext in JSON and handles hashing itself,
             # but VirtUI templates might expect substitution.
             content = self._substitute_variables(f.read(), config)
-            
+
         output_file = output_path / "user_configuration.json"
         self._write_file(output_file, content)
-        
+
         # Also handle user_credentials if present in templates
         creds_template = self.templates_dir / "archinstall-user-credentials.json"
         if creds_template.exists():
@@ -220,14 +245,14 @@ class AutomationEngine:
 
         if not template_name:
             template_name = "alpine-answers-basic.txt"
-        
+
         config = user_config.copy()
         config["vm_name"] = vm_name
         config.setdefault("timezone", "UTC")
         config.setdefault("ssh_server", "openssh")
         config.setdefault("ntp_client", "chrony")
         config.setdefault("disk_device", "/dev/vda")
-        
+
         # Detect desktop from template name and install needed stuff
         desktop_cmd = ""
         keyb_xorg_pkg = "apk add setxkbmap font-dejavu\nsetup-xorg-base\n"
@@ -250,13 +275,13 @@ class AutomationEngine:
         template_path = self._find_template(template_name, [".txt"])
         if not template_path:
             raise FileNotFoundError(f"Alpine template not found: {template_name}")
-            
+
         with open(template_path, "r", encoding="utf-8") as f:
             answers_content = self._substitute_variables(f.read(), config)
 
         # Default to apkovl tarball for full automation
         output_file = output_path / "localhost.apkovl.tar.gz"
-        
+
         with tarfile.open(output_file, "w:gz") as tar:
             # 1. Add answers.txt
             answers_data = answers_content.encode("utf-8")
@@ -301,25 +326,27 @@ reboot
         path = Path(name)
         if path.is_absolute() and path.exists():
             return path
-        
+
         # Try in templates directory
         target = self.templates_dir / name
         if target.exists():
             return target
-        
+
         # Try with extensions
         base = target.stem
         for ext in extensions:
             target = self.templates_dir / f"{base}{ext}"
             if target.exists():
                 return target
-        
+
         return None
 
-    def _substitute_variables(self, content: str, config: Dict[str, Any], hash_fields: List[str] = None) -> str:
+    def _substitute_variables(
+        self, content: str, config: Dict[str, Any], hash_fields: List[str] = None
+    ) -> str:
         """Generic variable substitution with optional password hashing."""
         substitutions = config.copy()
-        
+
         if hash_fields:
             for field in hash_fields:
                 if field in substitutions and substitutions[field]:
@@ -336,7 +363,9 @@ reboot
 
     def _write_file(self, path: Path, content: str):
         """Write content to file with restrictive permissions."""
-        with open(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8") as f:
+        with open(
+            os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w", encoding="utf-8"
+        ) as f:
             f.write(content)
 
     def _apply_autoyast_packages(self, content: str, packages: List[str]) -> str:
@@ -390,17 +419,15 @@ reboot
             return content
         anchor = "</profile>"
         if anchor not in content:
-            self.logger.warning(
-                "AutoYaST template has no </profile> anchor; post-install ignored"
-            )
+            self.logger.warning("AutoYaST template has no </profile> anchor; post-install ignored")
             return content
         body = "\n".join(cmds)
         scripts = (
             "    <!-- Post-install -->\n"
             "    <scripts>\n"
-            "        <chroot-scripts config:type=\"list\">\n"
+            '        <chroot-scripts config:type="list">\n'
             "            <script>\n"
-            "                <chrooted config:type=\"boolean\">true</chrooted>\n"
+            '                <chrooted config:type="boolean">true</chrooted>\n'
             "                <interpreter>shell</interpreter>\n"
             "                <source><![CDATA[\n"
             f"{body}\n"
@@ -412,8 +439,7 @@ reboot
         return content.replace(anchor, scripts + anchor, 1)
 
     def _apply_agama_post_install(self, content: str, commands: List[str]) -> str:
-        """Add a ``scripts.post`` entry running the given commands.
-        """
+        """Add a ``scripts.post`` entry running the given commands."""
         cmds = [str(c).strip() for c in commands if str(c).strip()]
         if not cmds:
             return content
@@ -426,11 +452,13 @@ reboot
         scripts = data.setdefault("scripts", {})
         post = scripts.setdefault("post", [])
         post[:] = [s for s in post if s.get("name") != "virtui-post-install.sh"]
-        post.append({
-            "name": "virtui-post-install.sh",
-            "chroot": True,
-            "content": body,
-        })
+        post.append(
+            {
+                "name": "virtui-post-install.sh",
+                "chroot": True,
+                "content": body,
+            }
+        )
         return json.dumps(data, indent=2, ensure_ascii=False)
 
     def _generate_basic_kickstart(self, config: Dict[str, Any]) -> str:

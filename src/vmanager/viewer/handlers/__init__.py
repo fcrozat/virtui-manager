@@ -10,8 +10,8 @@ from .display import DisplayHandler
 from .vm_state import VMStateHandler
 
 __all__ = [
-    'PowerHandler',
-    'ClipboardHandler',
-    'DisplayHandler',
-    'VMStateHandler',
+    "PowerHandler",
+    "ClipboardHandler",
+    "DisplayHandler",
+    "VMStateHandler",
 ]

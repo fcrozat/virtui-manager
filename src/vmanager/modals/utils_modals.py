@@ -1,6 +1,7 @@
 """
 Useful Modal screens
 """
+
 from __future__ import annotations
 
 import logging
@@ -179,9 +180,7 @@ class FileSelectionModal(BaseModal[Optional[str]]):
         start_dir = (
             path
             if path and os.path.isdir(path)
-            else os.path.dirname(path)
-            if path
-            else os.path.expanduser("/")
+            else os.path.dirname(path) if path else os.path.expanduser("/")
         )
         if not os.path.isdir(start_dir):
             start_dir = os.path.expanduser("/")

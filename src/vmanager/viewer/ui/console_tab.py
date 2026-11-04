@@ -8,6 +8,7 @@ import libvirt
 from typing import Optional, Callable
 
 import gi
+
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, GLib
 
@@ -21,9 +22,13 @@ class ConsoleTab:
     Provides text-based access to VM serial console for troubleshooting and headless access.
     """
 
-    def __init__(self, domain, conn,
-                 log_callback: Optional[Callable[[str], None]] = None,
-                 notification_callback: Optional[Callable[[str, Gtk.MessageType], None]] = None):
+    def __init__(
+        self,
+        domain,
+        conn,
+        log_callback: Optional[Callable[[str], None]] = None,
+        notification_callback: Optional[Callable[[str, Gtk.MessageType], None]] = None,
+    ):
         """
         Initialize the console tab.
 
@@ -353,4 +358,4 @@ Use 'virsh edit <vm-name>' to check/modify if needed.
             self.on_console_disconnect_clicked(None)
 
 
-__all__ = ['ConsoleTab']
+__all__ = ["ConsoleTab"]

@@ -273,9 +273,7 @@ class TestGetUefiFiles(unittest.TestCase):
 
     @patch("vmanager.firmware_manager.run_command")
     @patch("vmanager.firmware_manager.get_ssh_host_from_uri", return_value="user@host")
-    def test_remote_read_does_not_interpolate_filenames(
-        self, mock_ssh_host, mock_run_command
-    ):
+    def test_remote_read_does_not_interpolate_filenames(self, mock_ssh_host, mock_run_command):
         """Filenames with shell metacharacters are never interpolated into the
         remote command (the remote shell performs the globbing)."""
 

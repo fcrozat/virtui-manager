@@ -32,11 +32,13 @@ class TestVMCard(unittest.TestCase):
         self._token = active_app.set(self.mock_app)
 
         # Instantiate VMCard with patched methods to avoid side effects during setup
-        with patch("vmanager.vmcard.VMCard.update_button_layout"), patch(
-            "vmanager.vmcard.VMCard.update_stats"
-        ), patch("vmanager.vmcard.VMCard._update_status_styling"), patch(
-            "textual.widgets.Static._on_mount"
-        ), patch("textual.widgets.Static.render"):
+        with (
+            patch("vmanager.vmcard.VMCard.update_button_layout"),
+            patch("vmanager.vmcard.VMCard.update_stats"),
+            patch("vmanager.vmcard.VMCard._update_status_styling"),
+            patch("textual.widgets.Static._on_mount"),
+            patch("textual.widgets.Static.render"),
+        ):
             self.vm_card = VMCard()
 
     def tearDown(self):
@@ -75,9 +77,11 @@ class TestVMCard(unittest.TestCase):
     def test_raw_uuid(self):
         """Test raw_uuid property."""
         # Patch side-effect methods to avoid issues when setting internal_id
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123@qemu:///system"
             self.assertEqual(self.vm_card.raw_uuid, "uuid-123")
 
@@ -95,9 +99,11 @@ class TestVMCard(unittest.TestCase):
         mock_button = MagicMock()
         self.vm_card.query_one = MagicMock(return_value=mock_button)
 
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123"
             self.vm_card._update_webc_status()
 
@@ -107,9 +113,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_handle_shutdown_button(self):
         """Test _handle_shutdown_button method."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.status = StatusText.RUNNING
 
@@ -152,9 +160,11 @@ class TestVMCard(unittest.TestCase):
         mock_event = MagicMock()
         mock_event.button = 3  # Right button
 
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123@uri"
             self.vm_card.is_selected = False
 
@@ -172,9 +182,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_update_button_layout(self):
         """Test update_button_layout method."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.RUNNING
 
         # Mock the button elements to ensure they can be found
@@ -189,9 +201,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_update_stats(self):
         """Test update_stats method."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.RUNNING
 
         # Mock the necessary components
@@ -209,9 +223,11 @@ class TestVMCard(unittest.TestCase):
         mock_event.action = VmAction.START
 
         # Mock the internal methods
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.RUNNING
             self.vm_card.internal_id = "uuid-123"
 
@@ -229,9 +245,11 @@ class TestVMCard(unittest.TestCase):
         mock_event.button = MagicMock()
         mock_event.button.id = "start"
 
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.STOPPED
             self.vm_card.internal_id = "uuid-123"
 
@@ -244,9 +262,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_handle_clone_button(self):
         """Test _handle_clone_button method."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.STOPPED
             self.vm_card.internal_id = "uuid-123"
 
@@ -259,9 +279,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_handle_rename_button(self):
         """Test _handle_rename_button method."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.STOPPED
             self.vm_card.internal_id = "uuid-123"
 
@@ -274,9 +296,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_handle_delete_button(self):
         """Test _handle_delete_button method."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.STOPPED
             self.vm_card.internal_id = "uuid-123"
 
@@ -293,9 +317,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_xml_button_does_not_block_ui_on_xmldesc_call(self):
         """Test that _handle_xml_button doesn't block UI with XMLDesc() call."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.STOPPED
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.name = "test-vm"
@@ -339,9 +365,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_stats_worker_uses_threaded_execution(self):
         """Test that stats updates are executed in worker threads, not blocking UI."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.RUNNING
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.vm = MagicMock()
@@ -367,9 +395,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_stats_data_fetch_worker_does_not_block_main_thread(self):
         """Test that _stats_data_fetch_worker properly offloads blocking operations."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.status = StatusText.RUNNING
 
@@ -417,9 +447,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_configure_button_uses_loading_modal_to_prevent_ui_freeze(self):
         """Test that _handle_configure_button shows loading modal during blocking operations."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.STOPPED
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.name = "test-vm"
@@ -444,9 +476,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_snapshot_operations_use_workers_not_main_thread(self):
         """Test that snapshot operations don't block UI by using worker threads."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.RUNNING
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.name = "test-vm"
@@ -481,9 +515,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_clone_button_stops_background_workers_before_heavy_operation(self):
         """Test that clone operation stops background activities to prevent resource contention."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.STOPPED
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.name = "test-vm"
@@ -513,9 +549,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_stop_background_activities_cancels_all_workers(self):
         """Test that stop_background_activities properly cancels all background tasks."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.timer = MagicMock()
 
@@ -538,9 +576,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_timer_lock_prevents_race_conditions_in_update_stats(self):
         """Test that _timer_lock prevents concurrent timer creation."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.RUNNING
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.vm = MagicMock()
@@ -565,9 +605,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_handle_web_console_uses_worker_for_console_start(self):
         """Test that web console operations don't block UI."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.RUNNING
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.name = "test-vm"
@@ -602,9 +644,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_remote_viewer_connection_uses_worker_thread(self):
         """Test that remote viewer connection doesn't block UI."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.RUNNING
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.name = "test-vm"
@@ -629,9 +673,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_hibernate_operation_uses_worker_to_prevent_ui_block(self):
         """Test that hibernate operation runs in worker thread."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.RUNNING
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.name = "test-vm"
@@ -654,9 +700,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_unmount_cancels_workers_to_prevent_stale_updates(self):
         """Test that on_unmount properly cancels workers."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.vm = MagicMock()
             self.vm_card.timer = MagicMock()
@@ -691,9 +739,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_watch_name_updates_vmname_widget(self):
         """Test that watch_name updates the vmname widget when name changes."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.name = "old-name"
 
         # Mock the vmname widget
@@ -710,9 +760,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_watch_cpu_triggers_tooltip_update(self):
         """Test that watch_cpu triggers tooltip update."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update") as mock_tooltip:
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update") as mock_tooltip,
+        ):
             self.vm_card.cpu = 2
 
         # Call watch_cpu manually
@@ -722,9 +774,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_watch_memory_triggers_tooltip_update(self):
         """Test that watch_memory triggers tooltip update."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.memory = 1024
 
         with patch.object(self.vm_card, "_perform_tooltip_update") as mock_tooltip:
@@ -733,9 +787,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_watch_ip_addresses_triggers_tooltip_update(self):
         """Test that watch_ip_addresses triggers tooltip update."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.ip_addresses = []
 
         with patch.object(self.vm_card, "_perform_tooltip_update") as mock_tooltip:
@@ -744,9 +800,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_watch_boot_device_triggers_tooltip_update(self):
         """Test that watch_boot_device triggers tooltip update."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.boot_device = ""
 
         with patch.object(self.vm_card, "_perform_tooltip_update") as mock_tooltip:
@@ -755,9 +813,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_watch_cpu_model_triggers_tooltip_update(self):
         """Test that watch_cpu_model triggers tooltip update."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.cpu_model = ""
 
         with patch.object(self.vm_card, "_perform_tooltip_update") as mock_tooltip:
@@ -766,9 +826,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_watch_graphics_type_triggers_tooltip_update(self):
         """Test that watch_graphics_type triggers tooltip update."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.graphics_type = None
 
         with patch.object(self.vm_card, "_perform_tooltip_update") as mock_tooltip:
@@ -781,9 +843,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_watch_stats_view_mode_resources(self):
         """Test watch_stats_view_mode when switching to resources mode."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.RUNNING
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.compact_view = False
@@ -818,9 +882,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_watch_stats_view_mode_io(self):
         """Test watch_stats_view_mode when switching to io mode."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.RUNNING
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.compact_view = False
@@ -853,9 +919,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_toggle_stats_view_running_vm(self):
         """Test toggle_stats_view toggles mode for running VM."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.RUNNING
             self.vm_card.stats_view_mode = "resources"
 
@@ -867,9 +935,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_toggle_stats_view_stopped_vm_no_change(self):
         """Test toggle_stats_view does not toggle for stopped VM."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.STOPPED
             self.vm_card.stats_view_mode = "resources"
 
@@ -879,9 +949,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_update_sparkline_data_resources_mode(self):
         """Test update_sparkline_data in resources mode."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.RUNNING
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.stats_view_mode = "resources"
@@ -922,9 +994,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_watch_compact_view_enables_compact_mode(self):
         """Test watch_compact_view applies compact styles."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.compact_view = False
 
         mock_sparklines = MagicMock()
@@ -951,9 +1025,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_apply_compact_view_styles_detailed_mode(self):
         """Test _apply_compact_view_styles in detailed (non-compact) mode."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.compact_view = True
 
         mock_sparklines = MagicMock()
@@ -986,9 +1062,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_watch_is_selected_updates_checkbox(self):
         """Test watch_is_selected updates checkbox value."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.is_selected = False
 
         mock_checkbox = MagicMock()
@@ -1005,9 +1083,11 @@ class TestVMCard(unittest.TestCase):
         mock_event = MagicMock()
         mock_event.button = 1  # Left button
 
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123@uri"
             self.vm_card.is_selected = False
 
@@ -1027,9 +1107,11 @@ class TestVMCard(unittest.TestCase):
         mock_event = MagicMock()
         mock_event.value = True
 
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123@uri"
             self.vm_card.is_selected = False
 
@@ -1049,9 +1131,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_update_status_styling_running(self):
         """Test _update_status_styling for running status."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.RUNNING
 
         mock_status_widget = MagicMock()
@@ -1063,9 +1147,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_update_status_styling_stopped(self):
         """Test _update_status_styling for stopped status."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.STOPPED
 
         mock_status_widget = MagicMock()
@@ -1077,9 +1163,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_update_status_styling_paused(self):
         """Test _update_status_styling for paused status."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.PAUSED
 
         mock_status_widget = MagicMock()
@@ -1091,9 +1179,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_update_status_styling_loading(self):
         """Test _update_status_styling for loading status."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.LOADING
 
         mock_status_widget = MagicMock()
@@ -1105,9 +1195,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_update_status_styling_pmsuspended(self):
         """Test _update_status_styling for pmsuspended status."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.PMSUSPENDED
 
         mock_status_widget = MagicMock()
@@ -1119,9 +1211,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_update_status_styling_blocked(self):
         """Test _update_status_styling for blocked status."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.BLOCKED
 
         mock_status_widget = MagicMock()
@@ -1137,9 +1231,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_get_uri_with_conn(self):
         """Test _get_uri returns correct URI."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.conn = MagicMock()
 
         self.mock_app.vm_service.get_uri_for_connection.return_value = "qemu:///system"
@@ -1150,9 +1246,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_get_uri_without_conn(self):
         """Test _get_uri returns empty string when no connection."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.conn = None
 
         result = self.vm_card._get_uri()
@@ -1161,9 +1259,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_get_snapshot_tab_title_with_snapshots(self):
         """Test _get_snapshot_tab_title with snapshots."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.vm = MagicMock()
 
         result = self.vm_card._get_snapshot_tab_title(5)
@@ -1172,9 +1272,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_get_snapshot_tab_title_no_snapshots(self):
         """Test _get_snapshot_tab_title with no snapshots."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.vm = MagicMock()
 
         result = self.vm_card._get_snapshot_tab_title(0)
@@ -1183,9 +1285,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_is_remote_server_local(self):
         """Test _is_remote_server returns False for local connection."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.conn = MagicMock()
 
         self.mock_app.vm_service.get_uri_for_connection.return_value = "qemu:///system"
@@ -1196,9 +1300,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_is_remote_server_remote_ssh(self):
         """Test _is_remote_server returns True for remote SSH connection."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.conn = MagicMock()
 
         self.mock_app.vm_service.get_uri_for_connection.return_value = (
@@ -1211,9 +1317,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_is_remote_server_no_conn(self):
         """Test _is_remote_server returns False when no connection."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.conn = None
 
         result = self.vm_card._is_remote_server()
@@ -1226,9 +1334,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_handle_stop_button_shows_confirmation(self):
         """Test _handle_stop_button shows confirmation dialog."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.RUNNING
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.name = "test-vm"
@@ -1246,9 +1356,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_handle_pause_button_running_vm(self):
         """Test _handle_pause_button for running VM."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.RUNNING
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.name = "test-vm"
@@ -1267,9 +1379,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_handle_pause_button_stopped_vm_shows_warning(self):
         """Test _handle_pause_button for stopped VM shows warning."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.STOPPED
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.name = "test-vm"
@@ -1283,9 +1397,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_handle_resume_button(self):
         """Test _handle_resume_button posts correct action."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.PAUSED
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.name = "test-vm"
@@ -1305,9 +1421,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_handle_migration_button_requires_two_servers(self):
         """Test _handle_migration_button requires at least two servers."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.RUNNING
             self.vm_card.internal_id = "uuid-123"
 
@@ -1324,17 +1442,20 @@ class TestVMCard(unittest.TestCase):
 
     def test_watch_internal_id_cancels_old_workers(self):
         """Test watch_internal_id cancels workers when ID changes."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "old-uuid-123"
 
         self.mock_app.worker_manager.cancel = MagicMock()
 
-        with patch.object(self.vm_card, "update_snapshot_tab_title"), patch.object(
-            self.vm_card, "update_button_layout"
-        ), patch.object(self.vm_card, "update_stats"), patch.object(
-            self.vm_card, "_perform_tooltip_update"
+        with (
+            patch.object(self.vm_card, "update_snapshot_tab_title"),
+            patch.object(self.vm_card, "update_button_layout"),
+            patch.object(self.vm_card, "update_stats"),
+            patch.object(self.vm_card, "_perform_tooltip_update"),
         ):
             VMCard.watch_internal_id(self.vm_card, "old-uuid-123", "new-uuid-456")
 
@@ -1351,9 +1472,11 @@ class TestVMCard(unittest.TestCase):
         """Test _handle_stats_error handles VIR_ERR_NO_DOMAIN."""
         import libvirt
 
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.timer = MagicMock()
 
@@ -1374,9 +1497,11 @@ class TestVMCard(unittest.TestCase):
         """Test _handle_stats_error handles connection errors."""
         import libvirt
 
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.name = "test-vm"
             self.vm_card.timer = None
@@ -1399,9 +1524,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_apply_stats_update_with_empty_stats(self):
         """Test _apply_stats_update handles empty stats gracefully."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.status = StatusText.RUNNING
 
@@ -1422,9 +1549,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_apply_stats_update_with_valid_stats(self):
         """Test _apply_stats_update properly updates VM state."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.status = StatusText.STOPPED
             self.vm_card.stats_view_mode = "resources"
@@ -1454,8 +1583,9 @@ class TestVMCard(unittest.TestCase):
 
         with patch.object(VMCard, "is_mounted", new_callable=PropertyMock) as mock_mounted:
             mock_mounted.return_value = True
-            with patch.object(self.vm_card, "_update_webc_status"), patch.object(
-                self.vm_card, "update_sparkline_data"
+            with (
+                patch.object(self.vm_card, "_update_webc_status"),
+                patch.object(self.vm_card, "update_sparkline_data"),
             ):
                 VMCard._apply_stats_update(self.vm_card, result)
 
@@ -1473,9 +1603,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_reset_for_reuse_cancels_workers(self):
         """Test reset_for_reuse properly cancels workers and resets state."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.timer = MagicMock()
             self.vm_card._boot_device_checked = True
@@ -1498,9 +1630,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_update_webc_status_not_running(self):
         """Test _update_webc_status when console is not running."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123"
             self.vm_card.vm = MagicMock()
             self.vm_card.webc_status_indicator = " 🌐"
@@ -1519,9 +1653,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_watch_webc_status_indicator_updates_status_widget(self):
         """Test watch_webc_status_indicator updates status widget."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.status = StatusText.RUNNING
 
         mock_status_widget = MagicMock()
@@ -1539,9 +1675,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_dispatch_action_start(self):
         """Test _dispatch_action for start action."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123"
 
         self.vm_card.post_message = MagicMock()
@@ -1555,9 +1693,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_dispatch_action_unknown(self):
         """Test _dispatch_action with unknown action does nothing."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123"
 
         # This should not raise an exception
@@ -1569,9 +1709,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_watch_server_border_color_selected(self):
         """Test watch_server_border_color when card is selected."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.is_selected = True
 
         VMCard.watch_server_border_color(self.vm_card, "blue", "green")
@@ -1583,9 +1725,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_watch_server_border_color_not_selected(self):
         """Test watch_server_border_color when card is not selected."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.is_selected = False
 
         VMCard.watch_server_border_color(self.vm_card, "blue", "green")
@@ -1600,9 +1744,11 @@ class TestVMCard(unittest.TestCase):
 
     def test_on_click_vmname_single_click(self):
         """Test on_click_vmname posts VMNameClicked on single click."""
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123@uri"
             self.vm_card.name = "test-vm"
             self.vm_card._last_click_time = 0
@@ -1620,9 +1766,11 @@ class TestVMCard(unittest.TestCase):
         """Test on_click_vmname fetches XML on double click."""
         import time
 
-        with patch.object(VMCard, "update_button_layout"), patch.object(
-            VMCard, "update_stats"
-        ), patch.object(VMCard, "_perform_tooltip_update"):
+        with (
+            patch.object(VMCard, "update_button_layout"),
+            patch.object(VMCard, "update_stats"),
+            patch.object(VMCard, "_perform_tooltip_update"),
+        ):
             self.vm_card.internal_id = "uuid-123@uri"
             self.vm_card.name = "test-vm"
             self.vm_card.compact_view = False
