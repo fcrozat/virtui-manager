@@ -315,6 +315,97 @@ class TestDeployFromConfig(unittest.TestCase):
         self.assertTrue(result["dryrun"])
         self.assertTrue(result["automated_install"])
 
+    # What a caller must never see after asking "what would happen": a name on
+    # the hypervisor that was not there before.
+    MUTATING = {
+        "createXML",
+        "defineXML",
+        "create",
+        "createWithFlags",
+        "storageVolCreateXML",
+        "storagePoolCreateXML",
+        "upload",
+        "download",
+        "stream",
+        "delete",
+        "destroy",
+        "poweroff",
+        "reboot",
+        "reset",
+        "undefine",
+        "undefineFlags",
+        "rename",
+        "setMetadata",
+        "attachDevice",
+        "detachDevice",
+    }
+
+    def _overlay_cfg(self):
+        """A boot config whose disk is not there yet, but names a base to overlay."""
+        return self._write_cfg(
+            {
+                "server": "local",
+                "vm_name": "sidekick-worker01",
+                "vm_type": "custom",
+                "memory_mb": 2048,
+                "vcpu": 2,
+                "disk_size_gb": 20,
+                "disk": {"volume": "sidekick-worker01", "backing_volume": "base"},
+                "seed": {"volume": "sidekick-worker01-seed"},
+            }
+        )
+
+    def _boot_dry_run(self, cfg_path, present):
+        """Run a boot deploy with `dryrun` and give back what the hypervisor saw."""
+        conn = MagicMock()
+        conn.lookupByName.side_effect = self._no_domain_error()
+        pool = self._pool_with(*present)
+        pool.isActive.return_value = False  # A dry run may not start it either.
+        conn.storagePoolLookupByName.return_value = pool
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+
+        with (
+            patch("vmanager.storage_manager.create_overlay_volume") as overlay,
+            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov,
+            patch("vmanager.vmanager_cmd.list_storage_pools"),
+            patch("vmanager.vmanager_cmd.list_networks"),
+            redirect_stdout(io.StringIO()) as buf,
+        ):
+            result = self.cmd.deploy_from_config(cfg_path, dryrun=True)
+        return result, buf.getvalue(), conn, pool, overlay, mock_prov
+
+    def test_a_dry_run_of_an_overlay_deploy_makes_no_volume(self):
+        """The overlay is the artifact a dry run is asked about most."""
+        cfg_path = self._overlay_cfg()
+        _result, out, _conn, _pool, overlay, _prov = self._boot_dry_run(
+            cfg_path, present=["base", "sidekick-worker01-seed"]
+        )
+        overlay.assert_not_called()
+        self.assertIn("base", out)
+        self.assertIn("sidekick-worker01", out)
+
+    def test_a_dry_run_of_a_boot_deploy_defines_no_domain(self):
+        """Even when everything it names is there, a dry run defines nothing."""
+        cfg_path = self._boot_cfg()
+        _result, _out, _conn, _pool, _overlay, prov = self._boot_dry_run(
+            cfg_path, present=["sidekick-worker01", "sidekick-worker01-seed"]
+        )
+        prov.return_value.provision_existing_volume.assert_not_called()
+
+    def test_a_dry_run_leaves_the_hypervisor_alone(self):
+        """Nothing the hypervisor could still carry away after a dry run."""
+        cfg_path = self._overlay_cfg()
+        result, _out, conn, pool, _overlay, _prov = self._boot_dry_run(
+            cfg_path, present=["base", "sidekick-worker01-seed"]
+        )
+        for seen in (conn, pool):
+            touched = {call[0] for call in seen.method_calls}
+            self.assertEqual(touched & self.MUTATING, set())
+        self.assertTrue(result["dryrun"])
+        self.assertEqual(result["domain"], "sidekick-worker01")
+        self.assertEqual(result["volume"], "sidekick-worker01")
+
     def test_deploy_from_config_vm_exists(self):
 
         cfg_path = self._write_cfg(

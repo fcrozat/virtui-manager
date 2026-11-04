@@ -425,6 +425,11 @@ The volumes have to be in the pool before the deploy runs, and libvirt has to
 see them — `volume upload` and `volume create-overlay` do that, or the files
 were put in the pool's directory and the pool refreshed.
 
+`--dryrun` asks the question and changes nothing, on either route: no pool is
+made or started, no overlay volume is created, no domain is defined. The summary
+says what would be made — a disk that is not in the pool yet is reported as the
+overlay of its base that the deploy would create.
+
 ### Managing deployment JSON files
 
 *   **`list_json`** (inside the CLI): lists all deployment JSON files you have

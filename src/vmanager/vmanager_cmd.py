@@ -4247,17 +4247,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 )
                 return
 
-        # Ensure default pool and network exist and are active
-        if not ensure_default_pool(conn):
-            self._deploy_fail(
-                "No storage pool available and could not create default pool.",
-                EXIT_OPERATION,
-                "pool_unavailable",
-            )
-            return
-        ensure_default_network(conn)
-        list_storage_pools.cache_clear()
-        list_networks.cache_clear()
+        # A deployment may have to make the pool and the network the machine lands
+        # in. A dry run answers without changing anything: the pool the config names
+        # is looked up below, which is all a caller can ask of it beforehand.
+        if not dryrun:
+            if not ensure_default_pool(conn):
+                self._deploy_fail(
+                    "No storage pool available and could not create default pool.",
+                    EXIT_OPERATION,
+                    "pool_unavailable",
+                )
+                return
+            ensure_default_network(conn)
+            list_storage_pools.cache_clear()
+            list_networks.cache_clear()
 
         # The pool the config names is the pool the machine lands in, so a name
         # that is not there is the pool's own answer, not a bad file.
@@ -4410,7 +4413,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 f"No storage pool '{pool_name}' on {server_name}.", EXIT_NOT_FOUND, "not_found"
             )
             return
-        _ensure_pool_active(pool)
+        if not dryrun:
+            # Bringing a pool up is a change of its own, so a dry run only reads.
+            _ensure_pool_active(pool)
 
         def volume_path(name):
             """Where a volume of this pool is, and how it is formatted."""
@@ -4421,6 +4426,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             return machine_resources.volume_path_and_format(volume)
 
         disk_path, disk_format = volume_path(disk_volume)
+        would_create = False
         if disk_path is None and cfg["backing_volume"]:
             backing_path, _ = volume_path(cfg["backing_volume"])
             if backing_path is None:
@@ -4430,17 +4436,23 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                     "not_found",
                 )
                 return
-            try:
-                volume = create_overlay_volume(pool, disk_volume, backing_path)
-                disk_path, disk_format = machine_resources.volume_path_and_format(volume)
-            except Exception as e:
-                self._deploy_fail(
-                    f"Could not make '{disk_volume}' over '{cfg['backing_volume']}': {e}",
-                    EXIT_OPERATION,
-                    "operation_failed",
-                )
-                return
-        if disk_path is None:
+            if dryrun:
+                # The volume is the thing a dry run is asked about most: say it
+                # would be made, and make nothing. An overlay is made qcow2.
+                would_create = True
+                disk_format = "qcow2"
+            else:
+                try:
+                    volume = create_overlay_volume(pool, disk_volume, backing_path)
+                    disk_path, disk_format = machine_resources.volume_path_and_format(volume)
+                except Exception as e:
+                    self._deploy_fail(
+                        f"Could not make '{disk_volume}' over '{cfg['backing_volume']}': {e}",
+                        EXIT_OPERATION,
+                        "operation_failed",
+                    )
+                    return
+        if disk_path is None and not would_create:
             self._deploy_fail(
                 f"No volume '{disk_volume}' in the pool '{pool_name}'.",
                 EXIT_NOT_FOUND,
@@ -4468,13 +4480,33 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             print(f"Server: {server_name}")
             print(f"Boots the volume: {disk_volume} ({disk_format or 'unknown format'})")
             if cfg["backing_volume"]:
-                print(f"  as an overlay of: {cfg['backing_volume']}")
+                verb = "would be made as" if would_create else "as"
+                print(f"  {verb} an overlay of: {cfg['backing_volume']}")
             if cfg["seed_volume"]:
                 print(f"Seed CD-ROM: {cfg['seed_volume']}")
             print(f"Memory: {memory_mb} MB, vCPU: {vcpu}")
             print(f"Network: {cfg['network']}")
             print(f"Boot Mode: {'UEFI' if cfg['boot_uefi'] else 'BIOS'}")
             print(f"Boot order: {cfg['boot']}")
+
+            # What would be, and no more: no volume, no domain, nothing started.
+            result = _deploy_result(
+                vm_name,
+                server_name,
+                pool_name,
+                cfg["network"],
+                cfg["boot_uefi"],
+                graphics or "none",
+                memory_mb,
+                vcpu,
+                None,
+                None,
+                dryrun=True,
+            )
+            result["volume"] = disk_volume
+            if cfg["seed_volume"]:
+                result["seed"] = cfg["seed_volume"]
+            return result
 
         def cli_progress_callback(stage, percent=None):
             if self.machine is not None:
