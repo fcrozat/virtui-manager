@@ -22,6 +22,7 @@ import urllib.request
 import uuid
 import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from enum import Enum
@@ -139,6 +140,32 @@ def progress_reporter(progress_callback: Optional[Callable[[str, int], None]]):
             logging.info(f"[{highest}%] {message}")
 
     return report
+
+
+@dataclass(frozen=True)
+class VolumeBoot:
+    """A machine that boots a disk it already has, decided once and carried whole.
+
+    These are not fourteen choices: they are one, seen from fourteen angles — the
+    firmware and the NVRAM file it needs, the seed and which of the two boots
+    first, the network the machine wakes up on. Listed as arguments they could
+    also arrive in the wrong order or half-finished without anything noticing.
+    """
+
+    vm_name: str
+    disk_path: str
+    disk_format: str
+    seed_path: str | None
+    memory_mb: int
+    vcpu: int
+    network_name: str
+    machine: str
+    boot_uefi: bool
+    loader_path: str | None
+    nvram_path: str | None
+    graphics: str | None
+    boot_device: str
+    metadata: Dict[str, Any] | None
 
 
 class VMProvisioner:
@@ -2558,20 +2585,22 @@ class VMProvisioner:
 
         report("Defining the machine", 40)
         xml = self._volume_boot_xml(
-            vm_name=vm_name,
-            disk_path=disk_path,
-            disk_format=disk_format,
-            seed_path=seed_path,
-            memory_mb=memory_mb,
-            vcpu_count=vcpu_count,
-            network_name=network_name,
-            machine=machine,
-            boot_uefi=boot_uefi,
-            loader_path=loader_path,
-            nvram_path=nvram_path,
-            graphics=graphics,
-            boot_device=boot_device,
-            metadata=metadata,
+            VolumeBoot(
+                vm_name=vm_name,
+                disk_path=disk_path,
+                disk_format=disk_format,
+                seed_path=seed_path,
+                memory_mb=memory_mb,
+                vcpu=vcpu_count,
+                network_name=network_name,
+                machine=machine,
+                boot_uefi=boot_uefi,
+                loader_path=loader_path,
+                nvram_path=nvram_path,
+                graphics=graphics,
+                boot_device=boot_device,
+                metadata=metadata,
+            )
         )
         try:
             domain = self.conn.defineXML(xml)
@@ -2589,47 +2618,32 @@ class VMProvisioner:
         report(f"{vm_name} is {'running' if start else 'defined'}", 100)
         return domain
 
-    def _volume_boot_xml(
-        self,
-        vm_name: str,
-        disk_path: str,
-        disk_format: str,
-        seed_path: str | None,
-        memory_mb: int,
-        vcpu_count: int,
-        network_name: str,
-        machine: str,
-        boot_uefi: bool,
-        loader_path: str | None,
-        nvram_path: str | None,
-        graphics: str | None,
-        boot_device: str,
-        metadata: Dict[str, Any] | None,
-    ) -> str:
+    def _volume_boot_xml(self, boot: VolumeBoot) -> str:
         """The domain XML for a machine that boots a disk it already has.
 
         Small on purpose: a disk, the seed, one virtio NIC on the network the
         caller named, a serial console, and nothing a headless machine has no use
-        for. `graphics` names a graphics device when the caller wants a screen.
+        for. `boot.graphics` names a graphics device when the caller wants one.
         """
+        vm_name = boot.vm_name
         # The seed boots first only when the caller says so; a built machine reads
         # it once and then lives on its disk.
-        disk_boot, seed_boot = ("2", "1") if boot_device == "cdrom" else ("1", "2")
+        disk_boot, seed_boot = ("2", "1") if boot.boot_device == "cdrom" else ("1", "2")
 
-        os_element = f"  <os>\n    <type arch='{xml_value(self.host_arch)}' machine='{xml_value(machine)}'>hvm</type>\n"
-        if boot_uefi and loader_path:
+        os_element = f"  <os>\n    <type arch='{xml_value(self.host_arch)}' machine='{xml_value(boot.machine)}'>hvm</type>\n"
+        if boot.boot_uefi and boot.loader_path:
             os_element += (
-                f"    <loader readonly='yes' type='pflash'>{xml_value(loader_path)}</loader>\n"
+                f"    <loader readonly='yes' type='pflash'>{xml_value(boot.loader_path)}</loader>\n"
             )
-            os_element += f"    <nvram>{xml_value(nvram_path)}</nvram>\n"
-        os_element += "    <boot dev='%s'/>\n" % ("cdrom" if boot_device == "cdrom" else "hd")
+            os_element += f"    <nvram>{xml_value(boot.nvram_path)}</nvram>\n"
+        os_element += "    <boot dev='%s'/>\n" % ("cdrom" if boot.boot_device == "cdrom" else "hd")
         os_element += "  </os>\n"
 
         xml = f"""<domain type='kvm'>
   <name>{xml_value(vm_name)}</name>
-  <memory unit='MiB'>{memory_mb}</memory>
-  <currentMemory unit='MiB'>{memory_mb}</currentMemory>
-  <vcpu placement='static'>{vcpu_count}</vcpu>
+  <memory unit='MiB'>{boot.memory_mb}</memory>
+  <currentMemory unit='MiB'>{boot.memory_mb}</currentMemory>
+  <vcpu placement='static'>{boot.vcpu}</vcpu>
 {os_element}  <features>
     <acpi/>
     <apic/>
@@ -2640,28 +2654,28 @@ class VMProvisioner:
   <on_reboot>restart</on_reboot>
   <on_crash>destroy</on_crash>
 """
-        if metadata:
-            xml += self._metadata_xml(metadata)
+        if boot.metadata:
+            xml += self._metadata_xml(boot.metadata)
 
         xml += "  <devices>\n"
         xml += f"""    <disk type='file' device='disk'>
-      <driver name='qemu' type='{disk_format}' cache='none'/>
-      <source file='{xml_value(disk_path)}'/>
+      <driver name='qemu' type='{boot.disk_format}' cache='none'/>
+      <source file='{xml_value(boot.disk_path)}'/>
       <target dev='vda' bus='virtio'/>
       <boot order='{disk_boot}'/>
     </disk>
 """
-        if seed_path:
+        if boot.seed_path:
             xml += f"""    <disk type='file' device='cdrom'>
       <driver name='qemu' type='raw'/>
-      <source file='{xml_value(seed_path)}'/>
+      <source file='{xml_value(boot.seed_path)}'/>
       <target dev='sda' bus='sata'/>
       <readonly/>
       <boot order='{seed_boot}'/>
     </disk>
 """
         xml += f"""    <interface type='network'>
-      <source network='{xml_value(network_name)}'/>
+      <source network='{xml_value(boot.network_name)}'/>
       <model type='virtio'/>
     </interface>
     <console type='pty'>
@@ -2669,11 +2683,11 @@ class VMProvisioner:
     </console>
     <memballoon model='virtio'/>
 """
-        if graphics:
+        if boot.graphics:
             xml += f"""    <video>
       <model type='virtio'/>
     </video>
-    <graphics type='{xml_value(graphics)}' port='-1' autoport='yes' listen='127.0.0.1'>
+    <graphics type='{xml_value(boot.graphics)}' port='-1' autoport='yes' listen='127.0.0.1'>
       <listen type='address' address='127.0.0.1'/>
     </graphics>
 """

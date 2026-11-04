@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict
 
@@ -77,6 +78,59 @@ def resolve_vm_resources(cfg: Dict[str, Any]):
     # No explicit disk -> None -> provision_vm uses DEFAULT_DISK_SIZE_GB[vm_type].
     disk_size_gb = cfg.get("disk_size_gb")
     return vm_type, memory_mb, vcpu, disk_size_gb
+
+
+@dataclass(frozen=True)
+class MachinePlan:
+    """The machine a deploy file asks for, settled once and carried whole.
+
+    Name, hypervisor, pool, network, firmware, screen, memory, vCPU, disk: the
+    same values travel from the file to the dry-run summary and on to the answer,
+    and until now they travelled as twelve positional arguments through two
+    functions, where a transposition would be a machine that is not the one the
+    file asked for. As one value a route can hand over the whole machine or
+    nothing of it.
+
+    `graphics` is whatever the file said, verbatim: an install answers with it as
+    read, and the route that boots a volume says `"none"` where the file left the
+    screen out. `disk_size_gb` is None when the file named no size, which means
+    the provisioner's own default for the profile, not zero.
+    """
+
+    vm_name: str
+    server_name: str
+    storage_pool: str
+    network: str
+    boot_uefi: bool
+    graphics: Any
+    memory_mb: int
+    vcpu: int
+    disk_size_gb: int | None
+    automation_config: Dict[str, Any] | None
+    vm_type: VMType
+
+    @classmethod
+    def of(cls, cfg, *, server_name, vm_name=None, automation_config=None) -> "MachinePlan":
+        """The plan a validated config asks for, resources resolved.
+
+        `vm_name` is given when the caller settled on a name the file does not
+        hold verbatim (a sanitised one), and `server_name` is what the connection
+        answered with, which the file cannot know.
+        """
+        vm_type, memory_mb, vcpu, disk_size_gb = resolve_vm_resources(cfg)
+        return cls(
+            vm_name=vm_name if vm_name else cfg["vm_name"],
+            server_name=server_name,
+            storage_pool=cfg["storage_pool"],
+            network=cfg["network"],
+            boot_uefi=cfg["boot_uefi"],
+            graphics=cfg["graphics"],
+            memory_mb=memory_mb,
+            vcpu=vcpu,
+            disk_size_gb=disk_size_gb,
+            automation_config=automation_config,
+            vm_type=vm_type,
+        )
 
 
 def load_deploy_config(path) -> Dict[str, Any]:

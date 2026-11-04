@@ -4144,14 +4144,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             return
 
         # 8. Provisioning
-        def cli_progress_callback(stage, percent):
-            columns, _ = shutil.get_terminal_size()
-            # Use carriage return to overwrite the same line
-            sys.stdout.write(f"\r[{percent}%] {stage}".ljust(columns - 1))
-            sys.stdout.flush()
-            if percent >= 100:
-                sys.stdout.write("\n")
-                sys.stdout.flush()
+        cli_progress_callback = self._progress_reporter(STAGE_INSTALL)
 
         print(f"\nProvisioning VM '{vm_name}' on server '{target_server}'...")
         try:
@@ -4187,6 +4180,32 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             raise MachineError(message, status=status, code=code)
         print(message)
 
+    def _progress_reporter(self, stage):
+        """What a long operation calls to say how far it has got.
+
+        One definition for every route: under ``--machine`` the line becomes a
+        progress event carrying `stage`, the name of the route doing the work,
+        and the operation's own text as the message; otherwise the same line is
+        drawn over itself on the terminal and the answer stays a human's. A
+        line without a percentage is progress too, but there is nothing to draw.
+        """
+
+        def report(text, percent=None):
+            if self.machine is not None:
+                self.machine.progress(stage, text, percent)
+                return
+            if percent is None:
+                return
+            columns, _ = shutil.get_terminal_size()
+            # Use carriage return to overwrite the same line
+            sys.stdout.write(f"\r[{percent}%] {text}".ljust(columns - 1))
+            sys.stdout.flush()
+            if percent >= 100:
+                sys.stdout.write("\n")
+                sys.stdout.flush()
+
+        return report
+
     def deploy_from_config(self, path, dryrun=False, session=None):
         """Deploy a single VM from a JSON config file (see ``prepare_json``).
 
@@ -4199,7 +4218,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         ``session`` to run under ``--machine``: failures then raise
         :class:`MachineError` and progress is reported as it happens.
         """
-        from .deploy_config import DeployConfigError, load_deploy_config, resolve_vm_resources
+        from .deploy_config import DeployConfigError, MachinePlan, load_deploy_config
 
         self.machine = session
 
@@ -4298,60 +4317,22 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 )
                 return
 
-        vm_type, memory_mb, vcpu, disk_size_gb = resolve_vm_resources(cfg)
-
-        network = cfg["network"]
-        storage_pool = cfg["storage_pool"]
-        boot_uefi = cfg["boot_uefi"]
-        graphics_type = cfg["graphics"]
+        plan = MachinePlan.of(
+            cfg,
+            server_name=server_name,
+            vm_name=vm_name,
+            automation_config=self._build_automation_config(cfg, vm_name),
+        )
         disk_format = cfg.get("disk_format")
 
-        automation_config = self._build_automation_config(cfg, vm_name)
-
         if dryrun:
-            self._print_deploy_summary(
-                cfg,
-                vm_name,
-                server_name,
-                iso_url,
-                network,
-                storage_pool,
-                boot_uefi,
-                graphics_type,
-                memory_mb,
-                vcpu,
-                disk_size_gb,
-                automation_config,
-            )
-            result = _deploy_result(
-                vm_name,
-                server_name,
-                storage_pool,
-                network,
-                boot_uefi,
-                graphics_type,
-                memory_mb,
-                vcpu,
-                disk_size_gb,
-                automation_config,
-                dryrun=True,
-            )
+            self._print_deploy_summary(cfg, plan, iso_url)
+            result = _deploy_result(plan, dryrun=True)
             if cfg["seed_volume"]:
                 result["seed"] = cfg["seed_volume"]
             return result
 
-        def cli_progress_callback(stage, percent):
-            if self.machine is not None:
-                # ``stage`` here is the provisioner's own line of text, which is
-                # the message of the contract; the stage names the route.
-                self.machine.progress(STAGE_INSTALL, stage, percent)
-                return
-            columns, _ = shutil.get_terminal_size()
-            sys.stdout.write(f"\r[{percent}%] {stage}".ljust(columns - 1))
-            sys.stdout.flush()
-            if percent >= 100:
-                sys.stdout.write("\n")
-                sys.stdout.flush()
+        cli_progress_callback = self._progress_reporter(STAGE_INSTALL)
 
         print(f"\nProvisioning VM '{vm_name}' on server '{server_name}'...")
         # Filled in by the provisioner while it serves the auto-install profile;
@@ -4360,25 +4341,25 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         try:
             domain = provisioner.provision_vm(
                 vm_name=vm_name,
-                vm_type=vm_type,
+                vm_type=plan.vm_type,
                 iso_url=iso_url,
-                storage_pool_name=storage_pool,
-                memory_mb=memory_mb,
-                vcpu=vcpu,
-                disk_size_gb=disk_size_gb,
+                storage_pool_name=plan.storage_pool,
+                memory_mb=plan.memory_mb,
+                vcpu=plan.vcpu,
+                disk_size_gb=plan.disk_size_gb,
                 disk_format=disk_format,
-                graphics_type=graphics_type,
-                boot_uefi=boot_uefi,
+                graphics_type=plan.graphics,
+                boot_uefi=plan.boot_uefi,
                 configure_before_install=False,
-                automation_config=automation_config,
+                automation_config=plan.automation_config,
                 # Surface the generated auto-install file path only when an
                 # unattended install profile is actually generated.
-                show_automation_path=bool(automation_config),
+                show_automation_path=bool(plan.automation_config),
                 # Collect the profile it serves into the answer, so a caller can
                 # read the URL back instead of scraping it off the terminal.
                 autoinstall_report=served_profile.update,
                 progress_callback=cli_progress_callback,
-                network_name=network,
+                network_name=plan.network,
                 metadata=cfg["metadata"],
                 seed_path=seed_path,
             )
@@ -4390,16 +4371,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                     start_vm(domain)
                     print(f"VM '{vm_name}' started.")
                 result = _deploy_result(
-                    vm_name,
-                    server_name,
-                    storage_pool,
-                    network,
-                    boot_uefi,
-                    graphics_type,
-                    memory_mb,
-                    vcpu,
-                    disk_size_gb,
-                    automation_config,
+                    plan,
                     running=bool(domain.isActive()),
                     autoinstall=served_profile,
                 )
@@ -4415,35 +4387,27 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         except Exception as e:
             self._deploy_fail(f"Failed to provision VM: {e}", EXIT_OPERATION, "provision_failed")
 
-    def _print_deploy_summary(
-        self,
-        cfg,
-        vm_name,
-        server_name,
-        iso_url,
-        network,
-        storage_pool,
-        boot_uefi,
-        graphics_type,
-        memory_mb,
-        vcpu,
-        disk_size_gb,
-        automation_config,
-    ):
-        """Print a dry-run summary of what ``deploy_from_config`` would do."""
+    def _print_deploy_summary(self, cfg, plan, iso_url):
+        """Print a dry-run summary of what ``deploy_from_config`` would do.
+
+        The machine itself comes from `plan`; `cfg` is here for the parts of the
+        deploy file a plan does not carry: the profile name as written, and the
+        packages and registration the automation profile was built from.
+        """
+        automation_config = plan.automation_config
         print("\n--- Summary of Actions (dry run) ---")
-        print(f"VM Name: {vm_name}")
-        print(f"Server: {server_name}")
+        print(f"VM Name: {plan.vm_name}")
+        print(f"Server: {plan.server_name}")
         print(f"VM Type: {cfg['vm_type']}")
-        disk = disk_size_gb if disk_size_gb else "default"
-        print(f"Memory: {memory_mb} MB, vCPU: {vcpu}, Disk: {disk} GB")
+        disk = plan.disk_size_gb if plan.disk_size_gb else "default"
+        print(f"Memory: {plan.memory_mb} MB, vCPU: {plan.vcpu}, Disk: {disk} GB")
         print(f"ISO: {iso_url}")
         if cfg["seed_volume"]:
             print(f"Seed CD-ROM: {cfg['seed_volume']}")
-        print(f"Network: {network}")
-        print(f"Storage Pool: {storage_pool}")
-        print(f"Boot Mode: {'UEFI' if boot_uefi else 'BIOS'}")
-        print(f"Graphics: {graphics_type}")
+        print(f"Network: {plan.network}")
+        print(f"Storage Pool: {plan.storage_pool}")
+        print(f"Boot Mode: {'UEFI' if plan.boot_uefi else 'BIOS'}")
+        print(f"Graphics: {plan.graphics}")
         if automation_config:
             print(f"Automated Install: Yes (Template: {automation_config['template_name']})")
             ai = cfg.get("autoinstall") or {}
@@ -4476,7 +4440,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         of it first, so one config file describes a machine that starts from a
         base and writes nowhere else.
         """
-        from .deploy_config import resolve_vm_resources
+        from dataclasses import replace
+
+        from .deploy_config import MachinePlan
         from .storage_manager import _ensure_pool_active, create_overlay_volume
 
         pool_name = cfg["storage_pool"]
@@ -4541,8 +4507,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 )
                 return
 
-        _vm_type, memory_mb, vcpu, _disk_gb = resolve_vm_resources(cfg)
         graphics = None if str(cfg["graphics"]).lower() in ("", "none") else cfg["graphics"]
+        # The machine a boot deploys asks for is the file's, less two things the
+        # route answers its own way: a disk booted from a volume has no size of
+        # its own to report, and no screen is spelled `none` here.
+        plan = replace(
+            MachinePlan.of(cfg, server_name=server_name, vm_name=vm_name),
+            disk_size_gb=None,
+            graphics=graphics or "none",
+        )
 
         if dryrun:
             print("\n--- Summary of Actions (dry run) ---")
@@ -4554,34 +4527,19 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 print(f"  {verb} an overlay of: {cfg['backing_volume']}")
             if cfg["seed_volume"]:
                 print(f"Seed CD-ROM: {cfg['seed_volume']}")
-            print(f"Memory: {memory_mb} MB, vCPU: {vcpu}")
+            print(f"Memory: {plan.memory_mb} MB, vCPU: {plan.vcpu}")
             print(f"Network: {cfg['network']}")
             print(f"Boot Mode: {'UEFI' if cfg['boot_uefi'] else 'BIOS'}")
             print(f"Boot order: {cfg['boot']}")
 
             # What would be, and no more: no volume, no domain, nothing started.
-            result = _deploy_result(
-                vm_name,
-                server_name,
-                pool_name,
-                cfg["network"],
-                cfg["boot_uefi"],
-                graphics or "none",
-                memory_mb,
-                vcpu,
-                None,
-                None,
-                dryrun=True,
-            )
+            result = _deploy_result(plan, dryrun=True)
             result["volume"] = disk_volume
             if cfg["seed_volume"]:
                 result["seed"] = cfg["seed_volume"]
             return result
 
-        def cli_progress_callback(stage, percent=None):
-            if self.machine is not None:
-                self.machine.progress(STAGE_BOOT, stage, percent)
-                return
+        cli_progress_callback = self._progress_reporter(STAGE_BOOT)
 
         try:
             domain = provisioner.provision_existing_volume(
@@ -4589,11 +4547,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 disk_path=disk_path,
                 disk_format=disk_format or "qcow2",
                 seed_path=seed_path,
-                memory_mb=memory_mb,
-                vcpu_count=vcpu,
-                network_name=cfg["network"],
-                storage_pool_name=pool_name,
-                boot_uefi=cfg["boot_uefi"],
+                memory_mb=plan.memory_mb,
+                vcpu_count=plan.vcpu,
+                network_name=plan.network,
+                storage_pool_name=plan.storage_pool,
+                boot_uefi=plan.boot_uefi,
                 graphics=graphics,
                 boot_device=cfg["boot"],
                 metadata=cfg["metadata"],
@@ -4615,20 +4573,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             return
 
         print(f"\nSuccessfully booted VM '{vm_name}'.")
-        result = _deploy_result(
-            vm_name,
-            server_name,
-            pool_name,
-            cfg["network"],
-            cfg["boot_uefi"],
-            graphics or "none",
-            memory_mb,
-            vcpu,
-            None,
-            None,
-            dryrun=dryrun,
-            running=bool(domain.isActive()),
-        )
+        result = _deploy_result(plan, dryrun=dryrun, running=bool(domain.isActive()))
         result["volume"] = disk_volume
         if cfg["seed_volume"]:
             result["seed"] = cfg["seed_volume"]
@@ -5348,37 +5293,27 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         return [n for n in sorted(names) if n.startswith(text)]
 
 
-def _deploy_result(
-    vm_name,
-    server_name,
-    storage_pool,
-    network,
-    boot_uefi,
-    graphics_type,
-    memory_mb,
-    vcpu,
-    disk_size_gb,
-    automation_config,
-    dryrun=False,
-    running=False,
-    autoinstall=None,
-):
-    """What a deployment made, as the ``data`` of a ``--machine`` answer."""
+def _deploy_result(plan, dryrun=False, running=False, autoinstall=None):
+    """What a deployment made, as the ``data`` of a ``--machine`` answer.
+
+    The machine is `plan`, so an answer cannot disagree with what was asked for:
+    the same values a route deployed are the ones it reports.
+    """
     result = {
-        "domain": vm_name,
-        "server": server_name,
-        "storage_pool": storage_pool,
-        "network": network,
-        "firmware": "uefi" if boot_uefi else "bios",
-        "graphics": graphics_type,
-        "memory_mb": memory_mb,
-        "vcpu": vcpu,
-        "automated_install": bool(automation_config),
+        "domain": plan.vm_name,
+        "server": plan.server_name,
+        "storage_pool": plan.storage_pool,
+        "network": plan.network,
+        "firmware": "uefi" if plan.boot_uefi else "bios",
+        "graphics": plan.graphics,
+        "memory_mb": plan.memory_mb,
+        "vcpu": plan.vcpu,
+        "automated_install": bool(plan.automation_config),
         "dryrun": dryrun,
         "running": running,
     }
-    if disk_size_gb:
-        result["disk_gb"] = disk_size_gb
+    if plan.disk_size_gb:
+        result["disk_gb"] = plan.disk_size_gb
     if autoinstall:
         # Where the generated profile sits and the URL the guest was told to
         # fetch it from. Omitted rather than empty: no profile is a fact, and
