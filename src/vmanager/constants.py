@@ -585,8 +585,7 @@ class StaticText:  # pylint: disable=too-few-public-methods
     ACTIONS = _("Actions")
     NODESET_EXAMPLE = _("e.g., 0-1")
     CPU_TUNE_HELP_TITLE = _("CPU Tuning Help")
-    CPU_TUNE_HELP_TEXT = _(
-        """
+    CPU_TUNE_HELP_TEXT = _("""
 # CPU Tune Help
 
 ## CPU Pinning (vcpupin)
@@ -603,11 +602,9 @@ Specify which physical CPUs (host CPUs) each virtual CPU (guest CPU) can run on.
 * `0:0-3`: Pin vCPU 0 to physical CPUs 0, 1, 2, and 3.
 * `0:0,2`: Pin vCPU 0 to physical CPUs 0 and 2.
 * `0:0-1; 1:2-3`: Pin vCPU 0 to physical CPUs 0-1, and vCPU 1 to physical CPUs 2-3.
-"""
-    )
+""")
     NUMA_TUNE_HELP_TITLE = _("NUMA Tuning Help")
-    NUMA_TUNE_HELP_TEXT = _(
-        """
+    NUMA_TUNE_HELP_TEXT = _("""
 # NUMA Tune Help
 
 ## Memory Modes
@@ -620,8 +617,7 @@ Specify the NUMA nodes to use.
 * Example: `0` (Node 0 only)
 * Example: `0-1` (Nodes 0 and 1)
 * Example: `0,2-3` (Node 0 and nodes 2 through 3)
-"""
-    )
+""")
     REFRESHING_HOST_STATS = _("Refreshing host stats")
     SELECT_SERVER_FOR_PREFS = _("Select a server for Preferences")
     SELECT_SERVER_FOR_VIRSH = _("Select a server for Virsh Shell")
@@ -1395,6 +1391,65 @@ class MachineModeText:  # pylint: disable=too-few-public-methods
     NO_MACHINE_RESULT_TEMPLATE = "The command '{command}' has no machine-readable result."
     UNKNOWN_SUBCOMMAND_TEMPLATE = "Unknown machine subcommand '{subcommand}'."
     NO_SUCH_FLAG_TEMPLATE = "machine info has no {flag} flag."
+
+
+class MachineResourceText:  # pylint: disable=too-few-public-methods
+    """What the resource commands of ``vmc --machine`` answer when told wrongly.
+
+    Not passed through `_()`, for the reason given on `MachineModeText`: a program
+    reads these, and the `code` field beside them is the part that must not vary.
+    Names of things — a pool, a volume, a flag — arrive as `{name}` so the sentence
+    stays here and the vocabulary of the command does not leak into it.
+    """
+
+    # Reading the words a command is made of
+    NO_SUCH_FLAG_TEMPLATE = "{command} has no --{flag} flag."
+    FLAG_TAKES_NO_VALUE_TEMPLATE = "--{flag} takes no value."
+    FLAG_NEEDS_VALUE_TEMPLATE = "--{flag} needs a value."
+    NEEDS_SUBCOMMAND_TEMPLATE = "{command} needs a subcommand ({subcommands})."
+    UNKNOWN_SUBCOMMAND_TEMPLATE = "Unknown {command} subcommand '{subcommand}'."
+    NEEDS_NAME_TEMPLATE = "{command} needs a name."
+    NEEDS_FLAG_TEMPLATE = "{command} needs --{flag}."
+    UNEXPECTED_ARGUMENT_PREFIX = "Unexpected argument: "
+
+    # Which hypervisor the command was meant for
+    NO_HYPERVISOR_CONNECTED = "No hypervisor is connected. Pass -u <uri>."
+    TOO_MANY_HYPERVISORS_TEMPLATE = (
+        "{count} hypervisors are connected, and a resource command means one. "
+        "Pass -u <uri> to name it."
+    )
+
+    # A thing asked for by name
+    NOT_FOUND_TEMPLATE = "No {kind} '{name}'."
+    COULD_NOT_READ_TEMPLATE = "Could not read the {kind} '{name}': {error}"
+
+    # Storage pools
+    POOL_ALREADY_DEFINED_TEMPLATE = "A storage pool '{name}' is already defined."
+    COULD_NOT_CREATE_POOL_TEMPLATE = "Could not create the pool '{name}': {error}"
+    COULD_NOT_LIST_POOL_TEMPLATE = "Could not list the pool: {error}"
+
+    # Volumes
+    VOLUME_ALREADY_IN_POOL_TEMPLATE = "A volume '{name}' is already in this pool."
+    BACKING_HAS_NO_PATH_TEMPLATE = "The backing volume '{name}' has no path to record."
+    SIZE_NOT_A_NUMBER_TEMPLATE = "--size must be a number of gigabytes (got '{value}')."
+    FORMAT_MUST_BE_RAW_OR_QCOW2_TEMPLATE = "--format must be raw or qcow2 (got '{value}')."
+    NO_SUCH_FILE_TEMPLATE = "No such file: {path}"
+    COULD_NOT_CREATE_VOLUME_TEMPLATE = "Could not create the volume '{name}': {error}"
+    COULD_NOT_CREATE_OVERLAY_TEMPLATE = "Could not create the overlay '{name}': {error}"
+    COULD_NOT_REPLACE_VOLUME_TEMPLATE = "Could not replace the volume '{name}': {error}"
+    COULD_NOT_DELETE_VOLUME_TEMPLATE = "Could not delete '{name}': {error}"
+    COULD_NOT_RENAME_VOLUME_TEMPLATE = "Could not rename '{name}' to '{new_name}': {error}"
+    COULD_NOT_UPLOAD_TEMPLATE = "Could not upload '{source}': {error}"
+
+    # Domains, networks, hosts
+    COULD_NOT_LIST_DOMAINS_TEMPLATE = "Could not list the domains: {error}"
+    COULD_NOT_LIST_NETWORKS_TEMPLATE = "Could not list the networks: {error}"
+    COULD_NOT_ACT_ON_DOMAIN_TEMPLATE = "Could not {action} '{name}': {error}"
+    COULD_NOT_READ_METADATA_TEMPLATE = "Could not read the metadata of '{name}': {error}"
+    COULD_NOT_READ_ADDRESSES_TEMPLATE = "Could not read the addresses of '{name}': {error}"
+    DOMAIN_RUNNING_REFUSAL_TEMPLATE = (
+        "The domain '{name}' is running; stop it before you {verb} it."
+    )
 
 
 class ProgressMessages:  # pylint: disable=too-few-public-methods

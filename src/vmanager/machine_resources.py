@@ -17,6 +17,7 @@ import xml.etree.ElementTree as ET
 
 import libvirt
 
+from .constants import MachineResourceText
 from .libvirt_utils import get_host_resources
 from .machine_mode import (
     EXIT_CONFIG,
@@ -77,15 +78,27 @@ def _words(args, path=""):
         if word.startswith("--"):
             name = word[2:]
             if allowed is not None and name not in allowed:
-                raise MachineError(f"{path} has no --{name} flag.", EXIT_USAGE, "usage")
+                raise MachineError(
+                    MachineResourceText.NO_SUCH_FLAG_TEMPLATE.format(command=path, flag=name),
+                    EXIT_USAGE,
+                    "usage",
+                )
             if name in FLAGS_WITHOUT_VALUE:
                 if index + 1 < len(args) and not args[index + 1].startswith("--"):
-                    raise MachineError(f"--{name} takes no value.", EXIT_USAGE, "usage")
+                    raise MachineError(
+                        MachineResourceText.FLAG_TAKES_NO_VALUE_TEMPLATE.format(flag=name),
+                        EXIT_USAGE,
+                        "usage",
+                    )
                 options[name] = True
                 index += 1
                 continue
             if index + 1 >= len(args):
-                raise MachineError(f"--{name} needs a value.", EXIT_USAGE, "usage")
+                raise MachineError(
+                    MachineResourceText.FLAG_NEEDS_VALUE_TEMPLATE.format(flag=name),
+                    EXIT_USAGE,
+                    "usage",
+                )
             options[name] = args[index + 1]
             index += 2
         else:
@@ -159,13 +172,27 @@ def _read_subcommand(command, args):
         known = ", ".join(
             sorted(word[len(command) + 1 :] for word in OPTIONS if word.startswith(f"{command} "))
         )
-        raise MachineError(f"{command} needs a subcommand ({known}).", EXIT_USAGE, "usage")
+        raise MachineError(
+            MachineResourceText.NEEDS_SUBCOMMAND_TEMPLATE.format(
+                command=command, subcommands=known
+            ),
+            EXIT_USAGE,
+            "usage",
+        )
     path = f"{command} {subcommand}"
     if path not in OPTIONS:
-        raise MachineError(f"Unknown {command} subcommand '{subcommand}'.", EXIT_USAGE, "usage")
+        raise MachineError(
+            MachineResourceText.UNKNOWN_SUBCOMMAND_TEMPLATE.format(
+                command=command, subcommand=subcommand
+            ),
+            EXIT_USAGE,
+            "usage",
+        )
     positional, options = _words(args[1:], path)
     if path in SUBJECT_WRITTEN_AFTER and not positional:
-        raise MachineError(f"{path} needs a name.", EXIT_USAGE, "usage")
+        raise MachineError(
+            MachineResourceText.NEEDS_NAME_TEMPLATE.format(command=path), EXIT_USAGE, "usage"
+        )
     return subcommand, positional, options
 
 
@@ -173,7 +200,11 @@ def _required(options, name, command):
     """The value of a mandatory option, or a usage error naming it."""
     value = options.get(name)
     if not value:
-        raise MachineError(f"{command} needs --{name}.", EXIT_USAGE, "usage")
+        raise MachineError(
+            MachineResourceText.NEEDS_FLAG_TEMPLATE.format(command=command, flag=name),
+            EXIT_USAGE,
+            "usage",
+        )
     return value
 
 
@@ -181,12 +212,15 @@ def _connection(app):
     """The connection of this run, which ``vmc -u`` opened before the command."""
     if not app.active_connections:
         raise MachineError(
-            "No hypervisor is connected. Pass -u <uri>.", EXIT_CONNECTION, "connection_failed"
+            MachineResourceText.NO_HYPERVISOR_CONNECTED,
+            EXIT_CONNECTION,
+            "connection_failed",
         )
     if len(app.active_connections) > 1:
         raise MachineError(
-            f"{len(app.active_connections)} hypervisors are connected, and a resource command "
-            "means one. Pass -u <uri> to name it.",
+            MachineResourceText.TOO_MANY_HYPERVISORS_TEMPLATE.format(
+                count=len(app.active_connections)
+            ),
             EXIT_CONFIG,
             "ambiguous_connection",
         )
@@ -203,9 +237,15 @@ def _not_found(error, what, name):
         libvirt.VIR_ERR_NO_NETWORK,
     )
     if codes in missing:
-        return MachineError(f"No {what} '{name}'.", EXIT_NOT_FOUND, "not_found")
+        return MachineError(
+            MachineResourceText.NOT_FOUND_TEMPLATE.format(kind=what, name=name),
+            EXIT_NOT_FOUND,
+            "not_found",
+        )
     return MachineError(
-        f"Could not read the {what} '{name}': {error}", EXIT_OPERATION, "operation_failed"
+        MachineResourceText.COULD_NOT_READ_TEMPLATE.format(kind=what, name=name, error=error),
+        EXIT_OPERATION,
+        "operation_failed",
     )
 
 
@@ -314,7 +354,9 @@ def _pool_command(app, args, _session):
         try:
             conn.storagePoolLookupByName(name)
             raise MachineError(
-                f"A storage pool '{name}' is already defined.", EXIT_EXISTS, "exists"
+                MachineResourceText.POOL_ALREADY_DEFINED_TEMPLATE.format(name=name),
+                EXIT_EXISTS,
+                "exists",
             )
         except libvirt.libvirtError as e:
             if e.get_error_code() != libvirt.VIR_ERR_NO_STORAGE_POOL:
@@ -323,7 +365,9 @@ def _pool_command(app, args, _session):
             pool = create_storage_pool(conn, name, "dir", target)
         except Exception as e:
             raise MachineError(
-                f"Could not create the pool '{name}': {e}", EXIT_OPERATION, "operation_failed"
+                MachineResourceText.COULD_NOT_CREATE_POOL_TEMPLATE.format(name=name, error=e),
+                EXIT_OPERATION,
+                "operation_failed",
             ) from e
         _pools_changed()
         return {"name": pool.name(), "path": _pool_path(pool)}
@@ -349,7 +393,9 @@ def _volume_command(app, args, session):
     conn = _connection(app)
     subcommand, positional, options = _read_subcommand("volume", args)
     if positional:
-        raise MachineError("Unexpected argument: " + positional[0], EXIT_USAGE, "usage")
+        raise MachineError(
+            MachineResourceText.UNEXPECTED_ARGUMENT_PREFIX + positional[0], EXIT_USAGE, "usage"
+        )
 
     if subcommand == "list":
         pool = _pool(conn, _required(options, "pool", "volume list"))
@@ -358,7 +404,9 @@ def _volume_command(app, args, session):
             names = pool.listVolumes()
         except libvirt.libvirtError as e:
             raise MachineError(
-                f"Could not list the pool: {e}", EXIT_OPERATION, "operation_failed"
+                MachineResourceText.COULD_NOT_LIST_POOL_TEMPLATE.format(error=e),
+                EXIT_OPERATION,
+                "operation_failed",
             ) from e
         entries = []
         for name in names:
@@ -384,7 +432,7 @@ def _volume_command(app, args, session):
         backing_path = _safe_get_volume_path(backing)
         if not backing_path:
             raise MachineError(
-                f"The backing volume '{backing_name}' has no path to record.",
+                MachineResourceText.BACKING_HAS_NO_PATH_TEMPLATE.format(name=backing_name),
                 EXIT_OPERATION,
                 "operation_failed",
             )
@@ -394,7 +442,9 @@ def _volume_command(app, args, session):
                 size_bytes = int(float(size) * 1024**3)
             except ValueError:
                 raise MachineError(
-                    f"--size must be a number of gigabytes (got '{size}').", EXIT_USAGE, "usage"
+                    MachineResourceText.SIZE_NOT_A_NUMBER_TEMPLATE.format(value=size),
+                    EXIT_USAGE,
+                    "usage",
                 ) from None
         else:
             size_bytes = None
@@ -403,7 +453,9 @@ def _volume_command(app, args, session):
             vol = create_overlay_volume(pool, name, backing_path, size_bytes=size_bytes)
         except Exception as e:
             raise MachineError(
-                f"Could not create the overlay '{name}': {e}", EXIT_OPERATION, "operation_failed"
+                MachineResourceText.COULD_NOT_CREATE_OVERLAY_TEMPLATE.format(name=name, error=e),
+                EXIT_OPERATION,
+                "operation_failed",
             ) from e
         _volumes_changed()
         return {"name": vol.name(), "path": _safe_get_volume_path(vol), "backing": backing_path}
@@ -423,7 +475,9 @@ def _volume_command(app, args, session):
             delete_volume(vol)
         except Exception as e:
             raise MachineError(
-                f"Could not delete '{name}': {e}", EXIT_OPERATION, "operation_failed"
+                MachineResourceText.COULD_NOT_DELETE_VOLUME_TEMPLATE.format(name=name, error=e),
+                EXIT_OPERATION,
+                "operation_failed",
             ) from e
         _volumes_changed()
         return {"name": name}
@@ -438,7 +492,9 @@ def _volume_command(app, args, session):
             vol.rename(new_name, 0)
         except libvirt.libvirtError as e:
             raise MachineError(
-                f"Could not rename '{name}' to '{new_name}': {e}",
+                MachineResourceText.COULD_NOT_RENAME_VOLUME_TEMPLATE.format(
+                    name=name, new_name=new_name, error=e
+                ),
                 EXIT_OPERATION,
                 "operation_failed",
             ) from e
@@ -465,12 +521,18 @@ def _refuse_existing(pool, name, force):
             return
         raise _not_found(e, "volume", name) from e
     if not force:
-        raise MachineError(f"A volume '{name}' is already in this pool.", EXIT_EXISTS, "exists")
+        raise MachineError(
+            MachineResourceText.VOLUME_ALREADY_IN_POOL_TEMPLATE.format(name=name),
+            EXIT_EXISTS,
+            "exists",
+        )
     try:
         existing.delete(0)
     except libvirt.libvirtError as e:
         raise MachineError(
-            f"Could not replace the volume '{name}': {e}", EXIT_OPERATION, "operation_failed"
+            MachineResourceText.COULD_NOT_REPLACE_VOLUME_TEMPLATE.format(name=name, error=e),
+            EXIT_OPERATION,
+            "operation_failed",
         ) from e
     # The name is free now, whether or not the new volume ends up on it.
     _volumes_changed()
@@ -489,10 +551,14 @@ def _volume_upload(conn, options, session):
     vol_format = options.get("format", "raw")
     if vol_format not in ("raw", "qcow2"):
         raise MachineError(
-            f"--format must be raw or qcow2 (got '{vol_format}').", EXIT_USAGE, "usage"
+            MachineResourceText.FORMAT_MUST_BE_RAW_OR_QCOW2_TEMPLATE.format(value=vol_format),
+            EXIT_USAGE,
+            "usage",
         )
     if not os.path.isfile(source):
-        raise MachineError(f"No such file: {source}", EXIT_CONFIG, "config")
+        raise MachineError(
+            MachineResourceText.NO_SUCH_FILE_TEMPLATE.format(path=source), EXIT_CONFIG, "config"
+        )
 
     _refuse_existing(pool, name, options.get("force"))
     size = os.path.getsize(source)
@@ -505,7 +571,9 @@ def _volume_upload(conn, options, session):
         vol = pool.createXML(vol_xml, 0)
     except libvirt.libvirtError as e:
         raise MachineError(
-            f"Could not create the volume '{name}': {e}", EXIT_OPERATION, "operation_failed"
+            MachineResourceText.COULD_NOT_CREATE_VOLUME_TEMPLATE.format(name=name, error=e),
+            EXIT_OPERATION,
+            "operation_failed",
         ) from e
 
     stream = None
@@ -538,7 +606,9 @@ def _volume_upload(conn, options, session):
         except libvirt.libvirtError:
             pass
         raise MachineError(
-            f"Could not upload '{source}': {e}", EXIT_OPERATION, "upload_failed"
+            MachineResourceText.COULD_NOT_UPLOAD_TEMPLATE.format(source=source, error=e),
+            EXIT_OPERATION,
+            "upload_failed",
         ) from e
 
     _volumes_changed()
@@ -561,7 +631,9 @@ def _domain_command(app, args, session):
             domains = conn.listAllDomains(0)
         except libvirt.libvirtError as e:
             raise MachineError(
-                f"Could not list the domains: {e}", EXIT_OPERATION, "operation_failed"
+                MachineResourceText.COULD_NOT_LIST_DOMAINS_TEMPLATE.format(error=e),
+                EXIT_OPERATION,
+                "operation_failed",
             ) from e
         prefix = options.get("prefix") or ""
         return {
@@ -593,14 +665,22 @@ def _domain_command(app, args, session):
     }
     action = actions.get(subcommand)
     if action is None:
-        raise MachineError(f"Unknown domain subcommand '{subcommand}'.", EXIT_USAGE, "usage")
+        raise MachineError(
+            MachineResourceText.UNKNOWN_SUBCOMMAND_TEMPLATE.format(
+                command="domain", subcommand=subcommand
+            ),
+            EXIT_USAGE,
+            "usage",
+        )
     if subcommand == "undefine":
         _refuse_if_running(domain, "undefine")
     try:
         action()
     except libvirt.libvirtError as e:
         raise MachineError(
-            f"Could not {subcommand} '{name}': {e}", EXIT_OPERATION, "operation_failed"
+            MachineResourceText.COULD_NOT_ACT_ON_DOMAIN_TEMPLATE.format(
+                action=subcommand, name=name, error=e
+            ),
         ) from e
     if session is not None and subcommand in ("start", "shutdown", "reboot", "destroy"):
         session.progress(subcommand, f"{subcommand} {name}")
@@ -628,7 +708,9 @@ def _domain_metadata(domain):
         properties = ET.fromstring(stored)
     except ET.ParseError as e:
         raise MachineError(
-            f"Could not read the metadata of '{domain.name()}': {e}",
+            MachineResourceText.COULD_NOT_READ_METADATA_TEMPLATE.format(
+                name=domain.name(), error=e
+            ),
             EXIT_OPERATION,
             "operation_failed",
         ) from e
@@ -676,7 +758,9 @@ def _pools_changed():
 def _refuse_if_running(domain, verb):
     if domain.isActive():
         raise MachineError(
-            f"The domain '{domain.name()}' is running; stop it before you {verb} it.",
+            MachineResourceText.DOMAIN_RUNNING_REFUSAL_TEMPLATE.format(
+                name=domain.name(), verb=verb
+            ),
             EXIT_OPERATION,
             "operation_failed",
         )
@@ -693,7 +777,9 @@ def _domain_address(domain, options):
         interfaces = get_vm_network_ip(domain)
     except libvirt.libvirtError as e:
         raise MachineError(
-            f"Could not read the addresses of '{domain.name()}': {e}",
+            MachineResourceText.COULD_NOT_READ_ADDRESSES_TEMPLATE.format(
+                name=domain.name(), error=e
+            ),
             EXIT_OPERATION,
             "operation_failed",
         ) from e
@@ -731,7 +817,9 @@ def _network_command(app, args, _session):
             networks = conn.listAllNetworks(0)
         except libvirt.libvirtError as e:
             raise MachineError(
-                f"Could not list the networks: {e}", EXIT_OPERATION, "operation_failed"
+                MachineResourceText.COULD_NOT_LIST_NETWORKS_TEMPLATE.format(error=e),
+                EXIT_OPERATION,
+                "operation_failed",
             ) from e
         return {
             "networks": [
