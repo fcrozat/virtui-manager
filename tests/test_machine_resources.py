@@ -715,6 +715,61 @@ class NetworkAndHostTest(unittest.TestCase):
         self.assertEqual(result["memory_mb"], 32768)
 
 
+class OneReadingPerResourceTest(unittest.TestCase):
+    """The table a person reads and the answer a program reads are drawn from the
+    same reading of the hypervisor.
+
+    They were not: the machine commands picked the fields out of libvirt a second
+    time, and did it slightly differently — a pool's free space and a volume's
+    format were read only for the answer, since the table has no column for them.
+    Two readings of one thing is how a pool came to be `active` in one and
+    `unavailable` in the other, which is the drift #12 was written about. So the
+    agreement is checked here, on the same fake hypervisor, in one test per
+    resource.
+    """
+
+    def setUp(self):
+        self.conn = FakeConnection()
+        self.pool = FakePool("default")
+        self.conn.pools["default"] = self.pool
+        self.pool.volumes["base.qcow2"] = FakeVolume("base.qcow2", self.pool.path)
+
+    def test_a_pool_is_the_same_thing_in_both(self):
+        from vmanager.storage_manager import list_storage_pools, pool_facts
+
+        facts = pool_facts(self.pool)
+        self.assertEqual(facts["available"], self.pool.free)
+        self.assertEqual(facts["path"], self.pool.path)
+
+        table = list_storage_pools(self.conn)[0]
+        self.assertEqual(
+            {key: table[key] for key in ("name", "status", "capacity", "available", "path")},
+            {key: facts[key] for key in ("name", "status", "capacity", "available", "path")},
+        )
+
+        told = answer(self.conn, "pool list")["pools"][0]
+        self.assertEqual(told["state"], facts["status"])
+        self.assertEqual(told["capacity_mb"], round(facts["capacity"] / 1024 / 1024))
+        self.assertEqual(told["available_mb"], round(facts["available"] / 1024 / 1024))
+
+    def test_a_volume_is_the_same_thing_in_both(self):
+        from vmanager.storage_manager import list_storage_volumes, volume_facts
+
+        facts = volume_facts(self.pool.volumes["base.qcow2"])
+        self.assertEqual(facts["name"], "base.qcow2")
+        self.assertEqual(facts["format"], "qcow2")
+
+        table = list_storage_volumes(self.pool)[0]
+        self.assertEqual(
+            {key: table[key] for key in ("name", "capacity", "allocation", "path", "format")},
+            {key: facts[key] for key in ("name", "capacity", "allocation", "path", "format")},
+        )
+
+        told = answer(self.conn, "volume info --pool default --name base.qcow2")
+        self.assertEqual(told["capacity_mb"], round(facts["capacity"] / 1024 / 1024))
+        self.assertEqual(told["format"], facts["format"])
+
+
 class CacheInvalidationTest(unittest.TestCase):
     """A command that changed the hypervisor must not leave the tool reading the old one.
 

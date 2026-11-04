@@ -32,14 +32,15 @@ from .machine_mode import (
 )
 from .storage_manager import (
     _ensure_pool_active,
-    _safe_get_pool_info,
-    _safe_get_volume_info,
     _safe_get_volume_path,
     create_overlay_volume,
     create_storage_pool,
     delete_volume,
     list_storage_pools,
     list_storage_volumes,
+    pool_facts,
+    pool_target_path,
+    volume_facts,
 )
 from .vm_actions import force_off_vm, guest_reboot, start_vm, stop_vm
 from .vm_provisioner import METADATA_NS
@@ -281,30 +282,28 @@ def _domain_state(domain):
         return "missing"
 
 
-def _volume_format(vol):
-    """The format of a volume's target, from its XML (`qcow2`, `raw`, ...)."""
-    try:
-        root = ET.fromstring(vol.XMLDesc(0))
-    except (libvirt.libvirtError, ET.ParseError):
-        return None
-    target = root.find("target/format")
-    return target.get("type") if target is not None else None
-
-
 def volume_path_and_format(vol):
     """Where a volume's bytes are, and how they are formatted (`qcow2`, `raw`)."""
-    return _safe_get_volume_path(vol), _volume_format(vol)
+    facts = volume_facts(vol)
+    return facts["path"], facts["format"]
 
 
 def _volume_entry(vol):
-    _type, capacity, allocation = _safe_get_volume_info(vol)
+    """A volume as this protocol answers it: the facts, in megabytes."""
+    facts = volume_facts(vol)
     return {
-        "name": vol.name(),
-        "path": _safe_get_volume_path(vol),
-        "capacity_mb": round(capacity / 1024 / 1024),
-        "allocation_mb": round(allocation / 1024 / 1024),
-        "format": _volume_format(vol),
+        "name": facts["name"],
+        "path": facts["path"],
+        "capacity_mb": _megabytes(facts["capacity"]),
+        "allocation_mb": _megabytes(facts["allocation"]),
+        "format": facts["format"],
     }
+
+
+def _megabytes(byte_count):
+    """Bytes as a caller counts them. A number a script compares is worth the
+    rounding; a fraction of a megabyte decides nothing."""
+    return round((byte_count or 0) / 1024 / 1024)
 
 
 # --------------------------------------------------------------------------------------
@@ -322,30 +321,32 @@ def _pool_command(app, args, _session):
         entries = []
         for pool in conn.listAllStoragePools(0):
             try:
-                name = pool.name()
+                # The reading behind the interactive `list_pool` table, so the
+                # two cannot tell different stories about one pool.
+                facts = pool_facts(pool)
             except libvirt.libvirtError:
+                # A pool that cannot say its own name is not one a caller could
+                # act on by it, so it is left out rather than named "unknown".
                 continue
-            capacity, allocation, available = _safe_get_pool_info(pool)
             entries.append(
                 {
-                    "name": name,
-                    "state": "active" if pool.isActive() else "inactive",
-                    "capacity_mb": round(capacity / 1024 / 1024),
-                    "available_mb": round(available / 1024 / 1024),
+                    "name": facts["name"],
+                    "state": facts["status"],
+                    "capacity_mb": _megabytes(facts["capacity"]),
+                    "available_mb": _megabytes(facts["available"]),
                 }
             )
         return {"pools": entries}
 
     if subcommand == "info":
-        pool = _pool(conn, positional[0])
-        capacity, allocation, available = _safe_get_pool_info(pool)
+        facts = pool_facts(_pool(conn, positional[0]))
         return {
-            "name": pool.name(),
-            "state": "active" if pool.isActive() else "inactive",
-            "capacity_mb": round(capacity / 1024 / 1024),
-            "allocation_mb": round(allocation / 1024 / 1024),
-            "available_mb": round(available / 1024 / 1024),
-            "path": _pool_path(pool),
+            "name": facts["name"],
+            "state": facts["status"],
+            "capacity_mb": _megabytes(facts["capacity"]),
+            "allocation_mb": _megabytes(facts["allocation"]),
+            "available_mb": _megabytes(facts["available"]),
+            "path": facts["path"],
         }
 
     if subcommand == "create":
@@ -372,16 +373,7 @@ def _pool_command(app, args, _session):
                 "operation_failed",
             ) from e
         _pools_changed()
-        return {"name": pool.name(), "path": _pool_path(pool)}
-
-
-def _pool_path(pool):
-    try:
-        root = ET.fromstring(pool.XMLDesc(0))
-        target = root.find("target/path")
-        return target.text if target is not None else None
-    except (libvirt.libvirtError, ET.ParseError):
-        return None
+        return {"name": pool.name(), "path": pool_target_path(pool)}
 
 
 # --------------------------------------------------------------------------------------
