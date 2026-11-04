@@ -4335,6 +4335,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 sys.stdout.flush()
 
         print(f"\nProvisioning VM '{vm_name}' on server '{server_name}'...")
+        # Filled in by the provisioner while it serves the auto-install profile;
+        # empty when there was no profile to serve.
+        served_profile: dict[str, str] = {}
         try:
             domain = provisioner.provision_vm(
                 vm_name=vm_name,
@@ -4352,6 +4355,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 # Surface the generated auto-install file path only when an
                 # unattended install profile is actually generated.
                 show_automation_path=bool(automation_config),
+                # Collect the profile it serves into the answer, so a caller can
+                # read the URL back instead of scraping it off the terminal.
+                autoinstall_report=served_profile.update,
                 progress_callback=cli_progress_callback,
                 network_name=network,
                 metadata=cfg["metadata"],
@@ -4375,6 +4381,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                     disk_size_gb,
                     automation_config,
                     running=bool(domain.isActive()),
+                    autoinstall=served_profile,
                 )
             self._deploy_fail(
                 "Provisioning did not return a domain.", EXIT_OPERATION, "provision_failed"
@@ -5325,6 +5332,7 @@ def _deploy_result(
     automation_config,
     dryrun=False,
     running=False,
+    autoinstall=None,
 ):
     """What a deployment made, as the ``data`` of a ``--machine`` answer."""
     result = {
@@ -5342,6 +5350,11 @@ def _deploy_result(
     }
     if disk_size_gb:
         result["disk_gb"] = disk_size_gb
+    if autoinstall:
+        # Where the generated profile sits and the URL the guest was told to
+        # fetch it from. Omitted rather than empty: no profile is a fact, and
+        # an empty object would read as a profile with nothing in it.
+        result["autoinstall"] = autoinstall
     return result
 
 

@@ -540,8 +540,15 @@ What a `deploy` answers, in `data`:
 | `vcpu` | number | virtual CPUs. |
 | `disk_gb` | number | disk size, only when the file set one. |
 | `automated_install` | boolean | whether an auto-install profile was generated. |
+| `autoinstall` | object | where that profile is and the URL the guest was told to fetch it from: `directory`, `file`, `url`. Only there when one was generated, never an empty object. |
 | `dryrun` | boolean | `true` when nothing was changed. |
 | `running` | boolean | whether the machine runs as the command answers — `true` or `false` on both routes, never a number. |
+
+A deploy that boots a volume has no `autoinstall` to report: nothing was
+generated and nothing was served. The same three values are written to the log at
+info, so a run's log says what was served even when nobody was watching the
+terminal — which is the case for a caller whose install then failed, the moment
+the profile is most wanted.
 
 Before it, a long command may report what it is doing, one event per line:
 

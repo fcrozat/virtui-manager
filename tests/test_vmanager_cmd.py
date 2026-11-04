@@ -722,12 +722,24 @@ class TestDeployFromConfig(unittest.TestCase):
         domain.isActive.return_value = 1
         return domain
 
-    def _deploy_an_install(self, cfg_path):
-        """Run an install deploy past the point where the answer is built."""
+    def _deploy_an_install(self, cfg_path, served=None):
+        """Run an install deploy past the point where the answer is built.
+
+        `served` is the auto-install profile the provisioner says it served, or
+        None when it generated none at all.
+        """
         conn = MagicMock()
         conn.lookupByName.side_effect = self._no_domain_error()
         self.cmd.active_connections["local"] = conn
         self.cmd._connect_one = MagicMock(return_value="local")
+        domain = self._domain_that_is_active()
+
+        def provision(**kwargs):
+            report = kwargs.get("autoinstall_report")
+            if served is not None and report:
+                report(served)
+            return domain
+
         with (
             patch("vmanager.vmanager_cmd.ensure_default_pool", return_value=True),
             patch("vmanager.vmanager_cmd.ensure_default_network"),
@@ -737,7 +749,7 @@ class TestDeployFromConfig(unittest.TestCase):
             patch("sys.stdout", MagicMock()),
             redirect_stdout(io.StringIO()),
         ):
-            mock_prov.return_value.provision_vm.return_value = self._domain_that_is_active()
+            mock_prov.return_value.provision_vm.side_effect = provision
             return self.cmd.deploy_from_config(cfg_path)
 
     def _deploy_a_boot_volume(self, cfg_path):
@@ -772,6 +784,30 @@ class TestDeployFromConfig(unittest.TestCase):
 
         answer = json.loads(json.dumps(result))
         self.assertIs(answer["running"], True)
+
+    def test_the_answer_carries_the_profile_that_was_served(self):
+        """A caller inspecting an install needs the URL the guest was told."""
+        served = {
+            "directory": "/tmp/virtui_automation_web01_4c7aa5b9",
+            "file": "autoinst-4c7aa5b9.xml",
+            "url": "http://192.168.122.1:8000/autoinst-4c7aa5b9.xml",
+        }
+
+        result = self._deploy_an_install(self._install_cfg(), served=served)
+
+        self.assertEqual(json.loads(json.dumps(result))["autoinstall"], served)
+
+    def test_a_machine_with_no_profile_answers_with_no_profile(self):
+        """Nothing was served, so there is nothing to say — not an empty object."""
+        result = self._deploy_an_install(self._install_cfg())
+
+        self.assertNotIn("autoinstall", json.loads(json.dumps(result)))
+
+    def test_the_route_that_boots_a_volume_reports_no_profile(self):
+        """Booting an existing disk generates no auto-install profile."""
+        result = self._deploy_a_boot_volume(self._boot_cfg())
+
+        self.assertNotIn("autoinstall", json.loads(json.dumps(result)))
 
     def test_deploy_in_machine_mode_reports_a_provisioning_failure(self):
         from vmanager.machine_mode import EXIT_OPERATION, MachineError, MachineSession

@@ -2664,6 +2664,7 @@ class VMProvisioner:
         progress_callback: Optional[Callable[[str, int], None]] = None,
         automation_config: Optional[Dict[str, Any]] = None,
         show_automation_path: bool = False,
+        autoinstall_report: Optional[Callable[[Dict[str, str]], None]] = None,
         network_name: str = "default",
         ovmf_debug: bool = False,
         metadata: dict[str, Any] | None = None,
@@ -2934,6 +2935,7 @@ class VMProvisioner:
         automation_file_path = None
         serial_console = False
         temp_dir = None
+        autoinst_filename = None
 
         if automation_config:
             serial_console = automation_config.get("serial_console", False)
@@ -3633,12 +3635,27 @@ class VMProvisioner:
 
         report(StaticText.PROVISIONING_COMPLETE, 100)
 
-        # Surface the auto-install file location for non-interactive callers
-        # (vmc deploy), so the generated profile can be inspected while the
-        # HTTP server keeps serving it during the OS installation.
-        if show_automation_path and temp_dir and auto_url:
-            print(f"\nAuto-install file served from: {temp_dir}")
-            print(f"  URL: {auto_url}")
+        # Surface the auto-install profile that is being served, so it can be
+        # inspected while the HTTP server keeps serving it during the OS
+        # installation: printed for whoever is watching, written to the log for
+        # whoever reads it afterwards, and handed to the caller for whatever it
+        # answers with. A deploy that failed is exactly when it matters most.
+        if temp_dir and auto_url:
+            served = {
+                "directory": str(temp_dir),
+                # Empty for a guest pointed at the directory instead of a file.
+                "file": autoinst_filename or "",
+                "url": auto_url,
+            }
+            self.logger.info(
+                f"Auto-install profile served from {served['directory']} "
+                f"(file {served['file'] or 'the directory itself'}) at {served['url']}"
+            )
+            if show_automation_path:
+                print(f"\nAuto-install file served from: {served['directory']}")
+                print(f"  URL: {served['url']}")
+            if autoinstall_report:
+                autoinstall_report(served)
 
         return dom
 
