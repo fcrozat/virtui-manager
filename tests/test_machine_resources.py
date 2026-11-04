@@ -138,11 +138,14 @@ class FakeVolume:
 
 
 class FakeDomain:
-    def __init__(self, name, state=None, active=True):
+    def __init__(self, name, state=None, active=True, disks=None):
         self._name = name
         self.state = libvirt.VIR_DOMAIN_RUNNING if state is None else state
         self.active = active
         self.actions = []
+        # The disks `vm_actions.start_vm` checks before it powers on.
+        self.disks = [] if disks is None else disks
+        self.connection = None
 
     def name(self):
         return self._name
@@ -161,7 +164,7 @@ class FakeDomain:
         self.actions.append("start")
         self.active = True
 
-    def poweroff(self):
+    def shutdown(self):
         self.actions.append("shutdown")
         self.active = False
 
@@ -177,6 +180,19 @@ class FakeDomain:
 
     def listAllSnapshots(self):
         return []
+
+    def UUIDString(self):
+        return f"uuid-{self._name}"
+
+    def connect(self):
+        return self.connection
+
+    def XMLDesc(self, _flags=0):
+        disks = "".join(
+            f"<disk device='disk' type='file'><source pool='{pool}' volume='{volume}'/></disk>"
+            for pool, volume in self.disks
+        )
+        return f"<domain><name>{self._name}</name><devices>{disks}</devices></domain>"
 
 
 class FakeConnection:
@@ -210,7 +226,12 @@ class FakeConnection:
     def lookupByName(self, name):
         if name not in self.domains:
             raise libvirt_error(libvirt.VIR_ERR_NO_DOMAIN, "No such domain")
-        return self.domains[name]
+        domain = self.domains[name]
+        domain.connection = self
+        return domain
+
+    def getURI(self):
+        return "qemu:///test"
 
     def listAllNetworks(self, _flags=0):
         return list(self.networks.values())
@@ -594,6 +615,50 @@ class DomainCommandTest(unittest.TestCase):
     def test_powering_on_a_machine_starts_it(self):
         answer(self.conn, "domain start quiet")
         self.assertEqual(self.conn.domains["quiet"].actions, ["start"])
+
+    def test_shutdown_is_the_gentle_one_and_destroy_the_plug(self):
+        """The two words the caller distinguishes, told apart by the hypervisor.
+
+        `poweroff` is not a method of the binding — it never was — so a machine
+        calling `domain shutdown` was answered with a crash rather than a guest
+        being asked politely.
+        """
+        self.conn.domains["plugged"] = FakeDomain("plugged")
+
+        answer(self.conn, "domain shutdown sidekick-vm")
+        self.assertEqual(self.conn.domains["sidekick-vm"].actions, ["shutdown"])
+        self.assertEqual(self.conn.domains["plugged"].actions, [])
+
+        answer(self.conn, "domain destroy plugged")
+        self.assertEqual(self.conn.domains["plugged"].actions, ["destroy"])
+
+    def test_starting_checks_the_disks_before_powering_on(self):
+        """The check the interactive `start` makes is the same command's check."""
+        self.conn.domains["missing"] = FakeDomain(
+            "missing", active=False, disks=[("default", "gone.qcow2")]
+        )
+        with self.assertRaises(MachineError) as raised:
+            answer(self.conn, "domain start missing")
+        self.assertEqual(raised.exception.status, EXIT_OPERATION)
+        self.assertEqual(self.conn.domains["missing"].actions, [])
+
+    def test_a_machine_told_to_stop_when_stopped_is_a_failed_operation(self):
+        with self.assertRaises(MachineError) as raised:
+            answer(self.conn, "domain shutdown quiet")
+        self.assertEqual(raised.exception.status, EXIT_OPERATION)
+
+    @unittest.skipUnless(
+        isinstance(getattr(libvirt, "VIR_ERR_NO_DOMAIN", None), int),
+        "needs the real libvirt binding, whose constants are numbers",
+    )
+    def test_the_domain_commands_only_use_methods_the_binding_has(self):
+        """A fake is free to invent a method the binding does not have; the
+        hypervisor is not, so the names are checked against the real thing."""
+        for method in ("create", "shutdown", "reboot", "destroy", "undefineFlags"):
+            self.assertTrue(
+                hasattr(libvirt.virDomain, method),
+                f"libvirt.virDomain has no {method}()",
+            )
 
     def test_a_running_machine_is_not_undone(self):
         with self.assertRaises(MachineError) as raised:

@@ -40,6 +40,7 @@ from .storage_manager import (
     list_storage_pools,
     list_storage_volumes,
 )
+from .vm_actions import force_off_vm, guest_reboot, start_vm, stop_vm
 from .vm_provisioner import METADATA_NS
 from .vm_queries import get_vm_network_ip
 
@@ -656,14 +657,7 @@ def _domain_command(app, args, session):
     if subcommand == "metadata":
         return {"name": name, "metadata": _domain_metadata(domain)}
 
-    actions = {
-        "start": lambda: domain.create(0),
-        "shutdown": lambda: domain.poweroff(),
-        "reboot": lambda: domain.reboot(0),
-        "destroy": lambda: domain.destroy(),
-        "undefine": lambda: domain.undefineFlags(libvirt.VIR_DOMAIN_UNDEFINE_MANAGED_SAVE),
-    }
-    action = actions.get(subcommand)
+    action = DOMAIN_LIFECYCLE.get(subcommand)
     if action is None:
         raise MachineError(
             MachineResourceText.UNKNOWN_SUBCOMMAND_TEMPLATE.format(
@@ -675,12 +669,23 @@ def _domain_command(app, args, session):
     if subcommand == "undefine":
         _refuse_if_running(domain, "undefine")
     try:
-        action()
+        action(domain)
     except libvirt.libvirtError as e:
         raise MachineError(
             MachineResourceText.COULD_NOT_ACT_ON_DOMAIN_TEMPLATE.format(
                 action=subcommand, name=name, error=e
             ),
+        ) from e
+    except Exception as e:
+        # `start_vm` says a disk is missing with a plain Exception, and a
+        # caller of this command is told the same either way: the operation
+        # did not happen, and the words say what was in the way.
+        raise MachineError(
+            MachineResourceText.COULD_NOT_ACT_ON_DOMAIN_TEMPLATE.format(
+                action=subcommand, name=name, error=e
+            ),
+            EXIT_OPERATION,
+            "operation_failed",
         ) from e
     if session is not None and subcommand in ("start", "shutdown", "reboot", "destroy"):
         session.progress(subcommand, f"{subcommand} {name}")
@@ -689,6 +694,22 @@ def _domain_command(app, args, session):
         "name": name,
         "state": _domain_state(domain) if subcommand != "undefine" else "undefined",
     }
+
+
+# What a machine is told to do, taken from the module the interactive commands
+# use rather than from a second reading of the same words. The difference is not
+# pedantry: `shutdown` is the ACPI event the guest sees and can refuse, and the
+# only thing resembling it in the binding that is not that event is `destroy`.
+# `start` arrives with the check the interactive command makes, that every disk
+# of the machine is where it said it would be — a machine started onto a missing
+# volume fails in a way the caller cannot read off the answer.
+DOMAIN_LIFECYCLE = {
+    "start": start_vm,
+    "shutdown": stop_vm,
+    "reboot": guest_reboot,
+    "destroy": force_off_vm,
+    "undefine": lambda domain: domain.undefineFlags(libvirt.VIR_DOMAIN_UNDEFINE_MANAGED_SAVE),
+}
 
 
 def _domain_metadata(domain):
