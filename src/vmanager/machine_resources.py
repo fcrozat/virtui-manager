@@ -125,6 +125,42 @@ OPTIONS = {
 # misled about the flag, and is answered as a bad argument rather than believed.
 FLAGS_WITHOUT_VALUE = {"force"}
 
+# The subcommands that act on one named thing, written after the command rather
+# than flagged: `pool info default`, `domain state web01`. `OPTIONS` says what a
+# subcommand may be given, this says what it must be given, and the manual writes
+# the same thing as `<name>`; tests/test_cli_docs.py holds the three together.
+SUBJECT_WRITTEN_AFTER = {
+    "pool info",
+    "pool create",
+    "domain state",
+    "domain address",
+    "domain metadata",
+    "domain start",
+    "domain shutdown",
+    "domain reboot",
+    "domain destroy",
+    "domain undefine",
+    "network info",
+}
+
+
+def _read_subcommand(command, args):
+    """The subcommand asked for, with the positionals and options after it.
+
+    `OPTIONS` is the vocabulary these commands dispatch on, so a word outside it
+    is refused before any flag is read: a caller is told the subcommand is the
+    thing it does not know, rather than that a flag it happened to add is not
+    real. Reading the subject here too means a command cannot forget to.
+    """
+    subcommand = args[0] if args else None
+    path = f"{command} {subcommand}"
+    if path not in OPTIONS:
+        raise MachineError(f"Unknown {command} subcommand '{subcommand}'.", EXIT_USAGE, "usage")
+    positional, options = _words(args[1:], path)
+    if path in SUBJECT_WRITTEN_AFTER and not positional:
+        raise MachineError(f"{path} needs a name.", EXIT_USAGE, "usage")
+    return subcommand, positional, options
+
 
 def _required(options, name, command):
     """The value of a mandatory option, or a usage error naming it."""
@@ -231,8 +267,7 @@ def _volume_entry(vol):
 def _pool_command(app, args, _session):
     """``pool list``, ``pool info <name>``, ``pool create <name> [--path <dir>]``."""
     conn = _connection(app)
-    subcommand = args[0] if args else None
-    positional, options = _words(args[1:], f"pool {subcommand}")
+    subcommand, positional, options = _read_subcommand("pool", args)
 
     if subcommand == "list":
         entries = []
@@ -253,8 +288,6 @@ def _pool_command(app, args, _session):
         return {"pools": entries}
 
     if subcommand == "info":
-        if not positional:
-            raise MachineError("pool info needs a name.", EXIT_USAGE, "usage")
         pool = _pool(conn, positional[0])
         capacity, allocation, available = _safe_get_pool_info(pool)
         return {
@@ -267,8 +300,6 @@ def _pool_command(app, args, _session):
         }
 
     if subcommand == "create":
-        if not positional:
-            raise MachineError("pool create needs a name.", EXIT_USAGE, "usage")
         name = positional[0]
         # A scripted caller that only says a name means a directory pool of its
         # own, not somebody else's images directory.
@@ -290,8 +321,6 @@ def _pool_command(app, args, _session):
         _pools_changed()
         return {"name": pool.name(), "path": _pool_path(pool)}
 
-    raise MachineError(f"Unknown pool subcommand '{subcommand}'.", EXIT_USAGE, "usage")
-
 
 def _pool_path(pool):
     try:
@@ -311,8 +340,7 @@ def _pool_path(pool):
 def _volume_command(app, args, session):
     """``volume list|info|upload|create-overlay|delete|rename --pool <pool> --name <name>``."""
     conn = _connection(app)
-    subcommand = args[0] if args else None
-    positional, options = _words(args[1:], f"volume {subcommand}")
+    subcommand, positional, options = _read_subcommand("volume", args)
     if positional:
         raise MachineError("Unexpected argument: " + positional[0], EXIT_USAGE, "usage")
 
@@ -414,8 +442,6 @@ def _volume_command(app, args, session):
             pass
         _volumes_changed()
         return {"name": new_name, "was": name}
-
-    raise MachineError(f"Unknown volume subcommand '{subcommand}'.", EXIT_USAGE, "usage")
 
 
 def _refuse_existing(pool, name, force):
@@ -521,8 +547,7 @@ def _volume_upload(conn, options, session):
 def _domain_command(app, args, session):
     """``domain list|state|address|metadata|start|shutdown|reboot|destroy|undefine <name>``."""
     conn = _connection(app)
-    subcommand = args[0] if args else None
-    positional, options = _words(args[1:], f"domain {subcommand}")
+    subcommand, positional, options = _read_subcommand("domain", args)
 
     if subcommand == "list":
         try:
@@ -540,8 +565,6 @@ def _domain_command(app, args, session):
             ]
         }
 
-    if not positional:
-        raise MachineError(f"domain {subcommand} needs a name.", EXIT_USAGE, "usage")
     name = positional[0]
     domain = _domain(conn, name)
 
@@ -694,8 +717,7 @@ def _domain_address(domain, options):
 def _network_command(app, args, _session):
     """``network list``, ``network info <name>``."""
     conn = _connection(app)
-    subcommand = args[0] if args else None
-    positional, options = _words(args[1:], f"network {subcommand}")
+    subcommand, positional, options = _read_subcommand("network", args)
 
     if subcommand == "list":
         try:
@@ -712,8 +734,6 @@ def _network_command(app, args, _session):
         }
 
     if subcommand == "info":
-        if not positional:
-            raise MachineError("network info needs a name.", EXIT_USAGE, "usage")
         try:
             network = conn.networkLookupByName(positional[0])
         except libvirt.libvirtError as e:
@@ -732,15 +752,12 @@ def _network_command(app, args, _session):
             "autostart": bool(network.getAutostart()),
         }
 
-    raise MachineError(f"Unknown network subcommand '{subcommand}'.", EXIT_USAGE, "usage")
-
 
 @machine_command("host")
 def _host_command(app, args, _session):
     """``host capabilities``, ``host resources``."""
     conn = _connection(app)
-    subcommand = args[0] if args else None
-    _words(args[1:], f"host {subcommand}")
+    subcommand, _, _ = _read_subcommand("host", args)
 
     if subcommand == "capabilities":
         resources = _node_information(conn)
@@ -756,8 +773,6 @@ def _host_command(app, args, _session):
 
     if subcommand == "resources":
         return _node_information(conn)
-
-    raise MachineError(f"Unknown host subcommand '{subcommand}'.", EXIT_USAGE, "usage")
 
 
 def _hostname(conn):

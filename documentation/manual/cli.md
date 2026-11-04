@@ -601,8 +601,8 @@ $ vmc --machine -c "pool create sidekick --path /srv/sidekick"
 | --- | --- |
 | `host capabilities` | hostname, the architectures guests can have, host CPUs, memory, UEFI. |
 | `host resources` | the same CPUs and memory, plus what a new machine could be given. |
-| `pool list` / `pool info --pool P` | the pools and their state, path and free space. |
-| `pool create --pool P [--path D]` | the pool it made. Without `--path`, a directory named after the pool. |
+| `pool list` / `pool info <name>` | the pools and their state, path and free space. |
+| `pool create <name> [--path D]` | the pool it made. Without `--path`, a directory named after the pool. |
 | `volume list --pool P` / `volume info --pool P --name V` | volumes with their size, format and path. |
 | `volume upload --pool P --name V --file F [--format raw\|qcow2] [--force]` | the volume, with the bytes it wrote. Streams; a whole image is never in memory. |
 | `volume create-overlay --pool P --name V --backing B [--size GB] [--force]` | the new volume, whose backing file is `B`. |
@@ -612,7 +612,8 @@ $ vmc --machine -c "pool create sidekick --path /srv/sidekick"
 | `domain address <name>` | its lease address, `ipv4` null when it has none yet. |
 | `domain metadata <name>` | the strings the caller stored on it, empty when it stored none. |
 | `domain start\|shutdown\|destroy\|reboot <name>` | the domain, after it was told. |
-| `network list` / `network info --network N` | the networks and their state, and `active` for a network without libvirt state. |
+| `domain undefine <name>` | the domain, `undefined`; a running one is refused (status 7). |
+| `network list` / `network info <name>` | the networks and their state, and `active` for a network without libvirt state. |
 | `machine info` | protocol version, name, version, and every command this vmc answers. |
 
 `--force` takes no value: written means yes, and `--force yes` is a bad argument
@@ -783,12 +784,13 @@ Snapshot 'pre-update' created for 'web-01'.
 | Category | Commands |
 |----------|----------|
 | Connection | `connect`, `disconnect`, `host_info`, `virsh` |
+
 | VM Selection | `list_vms`, `select_vm`, `unselect_vm`, `status`, `vm_info`, `show_selection` |
 | VM Operations | `start`, `stop`, `force_off`, `pause`, `resume`, `hibernate`, `delete`, `clone_vm`, `installvm`, `view` |
 | Snapshots | `snapshot_list`, `snapshot_create`, `snapshot_delete`, `snapshot_revert` |
 | Backups | `backup_create`, `backup_list`, `backup_status`, `backup_restore`, `backup_cleanup` |
 | Networking | `list_networks`, `net_start`, `net_stop`, `net_delete`, `net_info`, `net_autostart` |
-| Storage | `list_pool`, `list_unused_volumes` |
+| Storage | `list_pool`, `list_unused_volumes`, `delete_volume` |
 | Installation | `prepare_json`, `deploy_vm`, `list_json`, `show_json` |
 | Pipelines | `pipeline` (with `|` chaining) |
-| Shell/Utils | `bash`, `history`, `!<number>`, `quit`, `help` |
+| Shell/Utils | `bash`, `history`, `!<number>`, `about`, `quit`, `help` |
