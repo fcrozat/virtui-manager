@@ -58,14 +58,30 @@ STATE_NAMES = {
 }
 
 
-def _words(args):
-    """Split a command's words into its positionals and its ``--option value`` pairs."""
+def _words(args, path=""):
+    """Split a command's words into its positionals and its options.
+
+    `path` is the command these words belong to (`"volume upload"`), which decides
+    what a flag may be: one the command has never heard of, one given a value it
+    does not take, or one missing the value it needs are each answered at the word
+    that is wrong. Ignoring any of them would report success as though the flag
+    had been heeded.
+    """
+    allowed = OPTIONS.get(path)
     positional, options = [], {}
     index = 0
     while index < len(args):
         word = args[index]
         if word.startswith("--"):
             name = word[2:]
+            if allowed is not None and name not in allowed:
+                raise MachineError(f"{path} has no --{name} flag.", EXIT_USAGE, "usage")
+            if name in FLAGS_WITHOUT_VALUE:
+                if index + 1 < len(args) and not args[index + 1].startswith("--"):
+                    raise MachineError(f"--{name} takes no value.", EXIT_USAGE, "usage")
+                options[name] = True
+                index += 1
+                continue
             if index + 1 >= len(args):
                 raise MachineError(f"--{name} needs a value.", EXIT_USAGE, "usage")
             options[name] = args[index + 1]
@@ -103,15 +119,9 @@ OPTIONS = {
     "host resources": (),
 }
 
-
-def _reject_unknown_flags(path, options):
-    """Refuse a flag this command has never heard of, naming it."""
-    allowed = OPTIONS.get(path)
-    if allowed is None:
-        return  # An unknown subcommand reports itself, below the dispatch.
-    for name in sorted(options):
-        if name not in allowed:
-            raise MachineError(f"{path} has no --{name} flag.", EXIT_USAGE, "usage")
+# The flags that are their own value: written means yes. `--force yes` is a caller
+# misled about the flag, and is answered as a bad argument rather than believed.
+FLAGS_WITHOUT_VALUE = {"force"}
 
 
 def _required(options, name, command):
@@ -220,8 +230,7 @@ def _pool_command(app, args, _session):
     """``pool list``, ``pool info <name>``, ``pool create <name> [--path <dir>]``."""
     conn = _connection(app)
     subcommand = args[0] if args else None
-    positional, options = _words(args[1:])
-    _reject_unknown_flags(f"pool {subcommand}", options)
+    positional, options = _words(args[1:], f"pool {subcommand}")
 
     if subcommand == "list":
         entries = []
@@ -300,8 +309,7 @@ def _volume_command(app, args, session):
     """``volume list|info|upload|create-overlay|delete|rename --pool <pool> --name <name>``."""
     conn = _connection(app)
     subcommand = args[0] if args else None
-    positional, options = _words(args[1:])
-    _reject_unknown_flags(f"volume {subcommand}", options)
+    positional, options = _words(args[1:], f"volume {subcommand}")
     if positional:
         raise MachineError("Unexpected argument: " + positional[0], EXIT_USAGE, "usage")
 
@@ -404,16 +412,26 @@ def _volume_command(app, args, session):
 
 
 def _refuse_existing(pool, name, force):
-    """Stop a create or a rename that would take a name the pool already has."""
-    if force:
-        return
+    """Stop a create or a rename that would take a name the pool already has.
+
+    `--force` is the caller saying the name is its own to overwrite, so the volume
+    standing on it is deleted first — which is what makes room for the new one, and
+    what a caller that names the name twice means by it.
+    """
     try:
-        pool.storageVolLookupByName(name)
+        existing = pool.storageVolLookupByName(name)
     except libvirt.libvirtError as e:
         if e.get_error_code() == libvirt.VIR_ERR_NO_STORAGE_VOL:
             return
         raise _not_found(e, "volume", name) from e
-    raise MachineError(f"A volume '{name}' is already in this pool.", EXIT_EXISTS, "exists")
+    if not force:
+        raise MachineError(f"A volume '{name}' is already in this pool.", EXIT_EXISTS, "exists")
+    try:
+        existing.delete(0)
+    except libvirt.libvirtError as e:
+        raise MachineError(
+            f"Could not replace the volume '{name}': {e}", EXIT_OPERATION, "operation_failed"
+        ) from e
 
 
 def _volume_upload(conn, options, session):
@@ -493,8 +511,7 @@ def _domain_command(app, args, session):
     """``domain list|state|address|metadata|start|shutdown|reboot|destroy|undefine <name>``."""
     conn = _connection(app)
     subcommand = args[0] if args else None
-    positional, options = _words(args[1:])
-    _reject_unknown_flags(f"domain {subcommand}", options)
+    positional, options = _words(args[1:], f"domain {subcommand}")
 
     if subcommand == "list":
         try:
@@ -633,8 +650,7 @@ def _network_command(app, args, _session):
     """``network list``, ``network info <name>``."""
     conn = _connection(app)
     subcommand = args[0] if args else None
-    positional, options = _words(args[1:])
-    _reject_unknown_flags(f"network {subcommand}", options)
+    positional, options = _words(args[1:], f"network {subcommand}")
 
     if subcommand == "list":
         try:
@@ -679,7 +695,7 @@ def _host_command(app, args, _session):
     """``host capabilities``, ``host resources``."""
     conn = _connection(app)
     subcommand = args[0] if args else None
-    _reject_unknown_flags(f"host {subcommand}", _words(args[1:])[1])
+    _words(args[1:], f"host {subcommand}")
 
     if subcommand == "capabilities":
         resources = _node_information(conn)

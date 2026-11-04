@@ -76,6 +76,9 @@ class FakePool:
 
         root = ET.fromstring(xml)
         name = root.find("name").text
+        # A name in use is refused; a deleted volume's name is free.
+        if name in self.volumes and self.volumes[name].deleted_with is None:
+            raise libvirt_error(libvirt.VIR_ERR_OPERATION_FAILED, f"volume '{name}' already exists")
         format_element = root.find("target/format")
         volume = FakeVolume(
             name,
@@ -351,6 +354,49 @@ class VolumeCommandTest(unittest.TestCase):
         self.conn.streams[-1].send.assert_called_once_with(b"x" * 2048)
         self.conn.streams[-1].finish.assert_called_once()
         self.assertEqual(uploaded.name(), "disk.qcow2")
+
+    def test_upload_with_force_replaces_the_volume_of_that_name(self):
+        """`--force` is the caller saying the name is its own to overwrite."""
+        import os
+        from pathlib import Path
+
+        image = Path("/tmp") / "a-replacement.img"
+        image.write_bytes(b"y" * 1024)
+        self.addCleanup(lambda: os.remove(image))
+        old = self.pool.volumes["base.qcow2"]
+
+        out = io.StringIO()
+        run_command(
+            make_app(self.conn),
+            f"volume upload --pool default --name base.qcow2 --file {image} --force",
+            MachineSession("volume upload", stdout=out),
+        )
+        self.assertEqual(old.deleted_with, 0)
+        uploaded = self.pool.volumes["base.qcow2"]
+        self.assertIsNot(uploaded, old)
+        result = json.loads(out.getvalue().strip().splitlines()[-1])["data"]
+        self.assertEqual(result["bytes"], 1024)
+
+    def test_a_flag_that_takes_no_value_refuses_one(self):
+        """`--force yes` is a caller misled about the flag, not a yes."""
+        with self.assertRaises(MachineError) as raised:
+            answer(
+                self.conn,
+                "volume upload --pool default --name d --file /etc/hostname --force yes",
+            )
+        self.assertEqual(raised.exception.status, EXIT_USAGE)
+        self.assertIn("--force", str(raised.exception))
+
+    def test_force_written_last_is_still_a_flag(self):
+        run_command(
+            make_app(self.conn),
+            "volume delete --pool default --name base.qcow2 --force",
+            MachineSession("volume delete", stdout=io.StringIO()),
+        )
+        self.assertEqual(
+            self.pool.volumes["base.qcow2"].deleted_with,
+            libvirt.VIR_STORAGE_VOL_DELETE_WITH_SNAPSHOTS,
+        )
 
     def test_upload_of_a_file_that_is_not_there_is_a_config_error(self):
         with self.assertRaises(MachineError) as raised:

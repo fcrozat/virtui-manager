@@ -547,9 +547,9 @@ $ vmc --machine -c "pool create sidekick --path /srv/sidekick"
 | `pool list` / `pool info --pool P` | the pools and their state, path and free space. |
 | `pool create --pool P [--path D]` | the pool it made. Without `--path`, a directory named after the pool. |
 | `volume list --pool P` / `volume info --pool P --name V` | volumes with their size, format and path. |
-| `volume upload --pool P --name V --file F [--format raw\|qcow2]` | the volume, with the bytes it wrote. Streams; a whole image is never in memory. |
-| `volume create-overlay --pool P --name V --backing B [--size GB]` | the new volume, whose backing file is `B`. |
-| `volume delete --pool P --name V` / `volume rename --pool P --name V --new-name W` | what happened to the volume. |
+| `volume upload --pool P --name V --file F [--format raw\|qcow2] [--force]` | the volume, with the bytes it wrote. Streams; a whole image is never in memory. |
+| `volume create-overlay --pool P --name V --backing B [--size GB] [--force]` | the new volume, whose backing file is `B`. |
+| `volume delete --pool P --name V [--force]` / `volume rename --pool P --name V --new-name W [--force]` | what happened to the volume. |
 | `domain list [--prefix X]` | the domains and their state; `--prefix` keeps the names that start with it. |
 | `domain state <name>` | whether it runs, and whether libvirt has it at all. |
 | `domain address <name>` | its lease address, `ipv4` null when it has none yet. |
@@ -557,6 +557,13 @@ $ vmc --machine -c "pool create sidekick --path /srv/sidekick"
 | `domain start\|shutdown\|destroy\|reboot <name>` | the domain, after it was told. |
 | `network list` / `network info --network N` | the networks and their state, and `active` for a network without libvirt state. |
 | `machine info` | protocol version, name, version, and every command this vmc answers. |
+
+`--force` takes no value: written means yes, and `--force yes` is a bad argument
+(status 2) rather than a yes. Where it is offered it means the name is the
+caller's to overwrite — `upload` and `create-overlay` delete the volume standing
+on the name and make the new one in its place, `rename` does the same to the name
+being moved onto, and without it a name in use is status 6. A flag the command
+has never heard of is status 2 too, naming the flag.
 
 `volume delete` will not remove a volume a running machine is using — that is
 status 7, not a libvirt traceback. `pool delete` removes the pool definition
