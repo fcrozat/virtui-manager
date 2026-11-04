@@ -1,6 +1,7 @@
 """
 Library for VM creation and provisioning, supporting multiple Linux distributions.
 """
+
 from __future__ import annotations
 
 import base64
@@ -379,9 +380,10 @@ class VMProvisioner:
             req = urllib.request.Request(url)
             req.add_header("User-Agent", f"{AppInfo.namecase}/{AppInfo.version}")
 
-            with urllib.request.urlopen(req, context=context, timeout=30) as response, open(
-                dest_path, "wb"
-            ) as out_file:
+            with (
+                urllib.request.urlopen(req, context=context, timeout=30) as response,
+                open(dest_path, "wb") as out_file,
+            ):
                 content_length = response.getheader("Content-Length")
                 total_size = int(content_length.strip()) if content_length else 0
                 downloaded_size = 0
@@ -2569,7 +2571,9 @@ class VMProvisioner:
 
         os_element = f"  <os>\n    <type arch='{xml_value(self.host_arch)}' machine='{xml_value(machine)}'>hvm</type>\n"
         if boot_uefi and loader_path:
-            os_element += f"    <loader readonly='yes' type='pflash'>{xml_value(loader_path)}</loader>\n"
+            os_element += (
+                f"    <loader readonly='yes' type='pflash'>{xml_value(loader_path)}</loader>\n"
+            )
             os_element += f"    <nvram>{xml_value(nvram_path)}</nvram>\n"
         os_element += "    <boot dev='%s'/>\n" % ("cdrom" if boot_device == "cdrom" else "hd")
         os_element += "  </os>\n"

@@ -692,9 +692,7 @@ class TestDeployFromConfig(unittest.TestCase):
             redirect_stdout(io.StringIO()),
         ):
             mock_prov.return_value.provision_existing_volume.side_effect = provision
-            self.cmd.deploy_from_config(
-                cfg_path, session=MachineSession("deploy", stdout=stream)
-            )
+            self.cmd.deploy_from_config(cfg_path, session=MachineSession("deploy", stdout=stream))
 
         events = [json.loads(line) for line in stream.getvalue().splitlines()]
         self.assertEqual(

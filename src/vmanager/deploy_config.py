@@ -23,7 +23,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict
 
-from .vm_provisioner import VMType, VM_TYPE_DEFAULTS
+from .vm_provisioner import VM_TYPE_DEFAULTS, VMType
 
 
 class DeployConfigError(Exception):
@@ -245,9 +245,7 @@ def _validate(cfg: Dict[str, Any]) -> None:
         cfg["autoinstall"] = None
         return
     if ai_enabled and not ai.get("template"):
-        raise DeployConfigError(
-            "autoinstall.template is required when autoinstall.enabled is true"
-        )
+        raise DeployConfigError("autoinstall.template is required when autoinstall.enabled is true")
     pkgs = ai.get("packages")
     if pkgs is not None:
         if not isinstance(pkgs, list) or not all(isinstance(p, str) for p in pkgs):

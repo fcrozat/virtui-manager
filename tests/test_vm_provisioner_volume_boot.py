@@ -141,9 +141,7 @@ class VolumeBootXmlTest(unittest.TestCase):
 
     def test_a_firmware_path_holding_markup_is_still_one_value(self):
         loader, nvram = "/var/lib/libvirt&ox/OVMF.fd", "/var/lib/libvirt&ox/nvram.fd"
-        with patch.object(
-            self.provisioner, "_setup_uefi_nvram", return_value=(loader, nvram)
-        ):
+        with patch.object(self.provisioner, "_setup_uefi_nvram", return_value=(loader, nvram)):
             xml = self.boot(boot_uefi=True)
         self.assertEqual(xml.find("os/loader").text, loader)
         self.assertEqual(xml.find("os/nvram").text, nvram)

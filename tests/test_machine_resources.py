@@ -528,9 +528,7 @@ class DomainCommandTest(unittest.TestCase):
         self.conn.domains["sidekick-vm"].metadata = lambda _type, _uri: stored
         result = answer(self.conn, "domain metadata sidekick-vm")
         self.assertEqual(result["name"], "sidekick-vm")
-        self.assertEqual(
-            result["metadata"], {"owner": "mcp-sidekick", "instance": "worker01"}
-        )
+        self.assertEqual(result["metadata"], {"owner": "mcp-sidekick", "instance": "worker01"})
 
     def test_a_machine_with_nothing_stored_answers_nothing(self):
         """A caller asking what it left on a machine is not being told an error."""
@@ -573,9 +571,9 @@ class NetworkAndHostTest(unittest.TestCase):
         self.conn.networks["default"] = MagicMock()
         self.conn.networks["default"].name.return_value = "default"
         self.conn.networks["default"].isActive.return_value = 1
-        self.conn.networks["default"].XMLDesc.return_value = (
-            "<network><bridge name='virbr0'/></network>"
-        )
+        self.conn.networks[
+            "default"
+        ].XMLDesc.return_value = "<network><bridge name='virbr0'/></network>"
 
     def test_network_list_reports_what_is_there(self):
         result = answer(self.conn, "network list")
@@ -660,9 +658,7 @@ class CacheInvalidationTest(unittest.TestCase):
             with self.subTest(command=name):
                 self.pool.volumes["base.qcow2"] = FakeVolume("base.qcow2")
                 with (
-                    patch.object(
-                        machine_resources.list_storage_volumes, "cache_clear"
-                    ) as volumes,
+                    patch.object(machine_resources.list_storage_volumes, "cache_clear") as volumes,
                     patch.object(machine_resources.list_storage_pools, "cache_clear") as pools,
                     patch("vmanager.machine_resources.create_overlay_volume") as overlay,
                 ):

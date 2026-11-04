@@ -24,6 +24,7 @@ from pathlib import Path
 
 import libvirt
 
+from . import machine_resources  # noqa: F401  registers the pool/volume/domain/host commands
 from .backup_manager import BackupManager, BackupOptions, BackupType
 from .config import get_log_path, load_config
 from .constants import AppInfo, ServerPalette
@@ -33,8 +34,8 @@ from .machine_mode import (
     EXIT_CONFIG,
     EXIT_CONNECTION,
     EXIT_EXISTS,
-    EXIT_OK,
     EXIT_NOT_FOUND,
+    EXIT_OK,
     EXIT_OPERATION,
     EXIT_USAGE,
     STAGE_BOOT,
@@ -43,7 +44,6 @@ from .machine_mode import (
     MachineSession,
     run_command,
 )
-from . import machine_resources  # noqa: F401  registers the pool/volume/domain/host commands
 from .modals.input_modals import _sanitize_domain_name
 from .network_manager import (
     delete_network,
@@ -58,8 +58,8 @@ from .provisioning.templates.auto_template_manager import AutoYaSTTemplateManage
 from .storage_manager import (
     delete_volume,
     ensure_default_pool,
-    find_volume,
     find_vms_using_volume,
+    find_volume,
     list_storage_pools,
     list_storage_volumes,
     list_unused_volumes,
@@ -2169,9 +2169,7 @@ class VManagerCMD(cmd.Cmd):
         for conn in self.active_connections.values():
             for pool_info in list_storage_pools(conn):
                 if pool_info["name"] == pool_name:
-                    all_volumes.update(
-                        v["name"] for v in list_storage_volumes(pool_info["pool"])
-                    )
+                    all_volumes.update(v["name"] for v in list_storage_volumes(pool_info["pool"]))
                     break
 
         if not text:
@@ -4039,9 +4037,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                         or "preseed" in t["filename"].lower()
                     ]
                 elif "debian" in os_lower:
-                    templates = [
-                        t for t in all_templates if "preseed" in t["filename"].lower()
-                    ]
+                    templates = [t for t in all_templates if "preseed" in t["filename"].lower()]
                 elif "suse" in os_lower or "sles" in os_lower:
                     templates = [
                         t
@@ -4283,9 +4279,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
         iso_url = self._resolve_iso_url(provisioner, cfg)
         if not iso_url:
-            self._deploy_fail(
-                "Could not resolve ISO from config.", EXIT_CONFIG, "iso_unresolvable"
-            )
+            self._deploy_fail("Could not resolve ISO from config.", EXIT_CONFIG, "iso_unresolvable")
             return
 
         vm_type, memory_mb, vcpu, disk_size_gb = resolve_vm_resources(cfg)
@@ -4300,12 +4294,31 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
         if dryrun:
             self._print_deploy_summary(
-                cfg, vm_name, server_name, iso_url, network, storage_pool,
-                boot_uefi, graphics_type, memory_mb, vcpu, disk_size_gb, automation_config,
+                cfg,
+                vm_name,
+                server_name,
+                iso_url,
+                network,
+                storage_pool,
+                boot_uefi,
+                graphics_type,
+                memory_mb,
+                vcpu,
+                disk_size_gb,
+                automation_config,
             )
             return _deploy_result(
-                vm_name, server_name, storage_pool, network, boot_uefi, graphics_type,
-                memory_mb, vcpu, disk_size_gb, automation_config, dryrun=True,
+                vm_name,
+                server_name,
+                storage_pool,
+                network,
+                boot_uefi,
+                graphics_type,
+                memory_mb,
+                vcpu,
+                disk_size_gb,
+                automation_config,
+                dryrun=True,
             )
 
         def cli_progress_callback(stage, percent):
@@ -4351,8 +4364,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                     start_vm(domain)
                     print(f"VM '{vm_name}' started.")
                 return _deploy_result(
-                    vm_name, server_name, storage_pool, network, boot_uefi, graphics_type,
-                    memory_mb, vcpu, disk_size_gb, automation_config, running=domain.isActive(),
+                    vm_name,
+                    server_name,
+                    storage_pool,
+                    network,
+                    boot_uefi,
+                    graphics_type,
+                    memory_mb,
+                    vcpu,
+                    disk_size_gb,
+                    automation_config,
+                    running=domain.isActive(),
                 )
             self._deploy_fail(
                 "Provisioning did not return a domain.", EXIT_OPERATION, "provision_failed"
@@ -4363,9 +4385,21 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         except Exception as e:
             self._deploy_fail(f"Failed to provision VM: {e}", EXIT_OPERATION, "provision_failed")
 
-    def _print_deploy_summary(self, cfg, vm_name, server_name, iso_url,
-                              network, storage_pool, boot_uefi, graphics_type,
-                              memory_mb, vcpu, disk_size_gb, automation_config):
+    def _print_deploy_summary(
+        self,
+        cfg,
+        vm_name,
+        server_name,
+        iso_url,
+        network,
+        storage_pool,
+        boot_uefi,
+        graphics_type,
+        memory_mb,
+        vcpu,
+        disk_size_gb,
+        automation_config,
+    ):
         """Print a dry-run summary of what ``deploy_from_config`` would do."""
         print("\n--- Summary of Actions (dry run) ---")
         print(f"VM Name: {vm_name}")
@@ -4974,9 +5008,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             prefill, scc_config, selected, package_list, vm_name
         )
 
-    def _prepare_autoinstall_settings(
-        self, prefill, scc_config, selected, package_list, vm_name
-    ):
+    def _prepare_autoinstall_settings(self, prefill, scc_config, selected, package_list, vm_name):
         """Collect the auto-install settings, proposing the config pre-fill first.
 
         If the config has any pre-fill (credentials, locale or SCC), the user is
@@ -5179,9 +5211,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             try:
                 st = path.stat()
                 size = st.st_size
-                mtime = datetime.datetime.fromtimestamp(st.st_mtime).strftime(
-                    "%Y-%m-%d %H:%M"
-                )
+                mtime = datetime.datetime.fromtimestamp(st.st_mtime).strftime("%Y-%m-%d %H:%M")
             except OSError:
                 size, mtime = 0, "?"
             size_str = f"{size} B" if size < 1024 else f"{size / 1024:.1f} KB"
@@ -5282,8 +5312,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         return [n for n in sorted(names) if n.startswith(text)]
 
 
-def _deploy_result(vm_name, server_name, storage_pool, network, boot_uefi, graphics_type,
-                   memory_mb, vcpu, disk_size_gb, automation_config, dryrun=False, running=False):
+def _deploy_result(
+    vm_name,
+    server_name,
+    storage_pool,
+    network,
+    boot_uefi,
+    graphics_type,
+    memory_mb,
+    vcpu,
+    disk_size_gb,
+    automation_config,
+    dryrun=False,
+    running=False,
+):
     """What a deployment made, as the ``data`` of a ``--machine`` answer."""
     result = {
         "domain": vm_name,

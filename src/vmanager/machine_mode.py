@@ -7,7 +7,7 @@ commands print goes to stderr, and the exit status says what happened. The
 second half is the point: a command that fails has to fail with a status
 that is not 0.
 
-``data`` payloads are added command by command, and a command without one 
+``data`` payloads are added command by command, and a command without one
 answers with ``EXIT_UNSUPPORTED`` rather than an empty success.
 """
 
