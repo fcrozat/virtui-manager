@@ -10,7 +10,6 @@ import tempfile
 import unittest
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
@@ -225,9 +224,7 @@ class TestLoadDeployConfig(unittest.TestCase):
             }
         )
         cfg = load_deploy_config(path)
-        self.assertEqual(
-            cfg["post_install"]["commands"], ["echo hi", "a, b > c"]
-        )
+        self.assertEqual(cfg["post_install"]["commands"], ["echo hi", "a, b > c"])
 
     def test_post_install_requires_autoinstall(self):
         # No autoinstall block at all -> post_install is rejected.
@@ -323,9 +320,7 @@ class TestOpenSUSEPackages(unittest.TestCase):
         # Extra packages present, in order, before the closing tag
         self.assertIn("<package>ssh</package>", content)
         self.assertIn("<package>vim-extra</package>", content)
-        self.assertLess(
-            content.index("<package>ssh</package>"), content.index("</packages>")
-        )
+        self.assertLess(content.index("<package>ssh</package>"), content.index("</packages>"))
 
     def test_agama_packages_appended(self):
         out = self.engine.generate(
