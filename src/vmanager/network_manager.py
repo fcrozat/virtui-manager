@@ -12,7 +12,7 @@ from functools import lru_cache
 
 import libvirt
 
-from .libvirt_utils import get_host_domain_capabilities
+from .libvirt_utils import get_host_domain_capabilities, network_facts
 from .utils import log_function_call
 
 
@@ -97,18 +97,15 @@ def list_networks(conn):
 
     networks = []
     for net in conn.listAllNetworks():
-        xml_desc = net.XMLDesc(0)
-        root = ET.fromstring(xml_desc)
-
-        forward_elem = root.find("forward")
-        mode = forward_elem.get("mode") if forward_elem is not None else "isolated"
-
+        # The same reading the answers of ``vmc --machine`` are drawn from, so a
+        # network cannot be one thing on the screen and another to a script.
+        facts = network_facts(net)
         networks.append(
             {
-                "name": net.name(),
-                "mode": mode,
-                "active": net.isActive(),
-                "autostart": net.autostart(),
+                "name": facts["name"],
+                "mode": facts["forward_mode"],
+                "active": facts["active"],
+                "autostart": facts["autostart"],
             }
         )
     return networks

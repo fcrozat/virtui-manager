@@ -682,6 +682,9 @@ class FakeNetwork:
     def autostart(self):
         return self._autostart
 
+    def UUIDString(self):  # pylint: disable=invalid-name
+        return "0000-0000-" + self._name
+
 
 class NetworkAndHostTest(unittest.TestCase):
     def setUp(self):
@@ -751,6 +754,28 @@ class OneReadingPerResourceTest(unittest.TestCase):
         self.assertEqual(told["state"], facts["status"])
         self.assertEqual(told["capacity_mb"], round(facts["capacity"] / 1024 / 1024))
         self.assertEqual(told["available_mb"], round(facts["available"] / 1024 / 1024))
+
+    def test_a_network_is_the_same_thing_in_both(self):
+        from vmanager.libvirt_utils import network_facts
+        from vmanager.network_manager import list_networks
+
+        network = FakeNetwork("default", bridge="virbr7")
+        self.conn.networks["default"] = network
+
+        facts = network_facts(network)
+        self.assertTrue(facts["active"])
+        self.assertTrue(facts["autostart"])
+        self.assertEqual(facts["bridge_name"], "virbr7")
+
+        table = list_networks(self.conn)[0]
+        self.assertEqual(table["name"], facts["name"])
+        self.assertEqual(bool(table["active"]), facts["active"])
+        self.assertEqual(bool(table["autostart"]), facts["autostart"])
+
+        told = answer(self.conn, "network info default")
+        self.assertEqual(told["state"], "active" if facts["active"] else "inactive")
+        self.assertEqual(told["bridge"], facts["bridge_name"])
+        self.assertEqual(told["autostart"], facts["autostart"])
 
     def test_a_volume_is_the_same_thing_in_both(self):
         from vmanager.storage_manager import list_storage_volumes, volume_facts

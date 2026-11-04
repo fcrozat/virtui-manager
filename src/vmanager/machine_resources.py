@@ -18,7 +18,7 @@ import xml.etree.ElementTree as ET
 import libvirt
 
 from .constants import MachineResourceText
-from .libvirt_utils import get_host_resources
+from .libvirt_utils import get_host_resources, network_facts
 from .machine_mode import (
     EXIT_CONFIG,
     EXIT_CONNECTION,
@@ -298,6 +298,11 @@ def _volume_entry(vol):
         "allocation_mb": _megabytes(facts["allocation"]),
         "format": facts["format"],
     }
+
+
+def _state(active):
+    """Whether something runs, in the one word a caller switches on."""
+    return "active" if active else "inactive"
 
 
 def _megabytes(byte_count):
@@ -825,8 +830,8 @@ def _network_command(app, args, _session):
             ) from e
         return {
             "networks": [
-                {"name": network.name(), "state": "active" if network.isActive() else "inactive"}
-                for network in networks
+                {"name": facts["name"], "state": _state(facts["active"])}
+                for facts in (network_facts(network) for network in networks)
             ]
         }
 
@@ -835,20 +840,12 @@ def _network_command(app, args, _session):
             network = conn.networkLookupByName(positional[0])
         except libvirt.libvirtError as e:
             raise _not_found(e, "network", positional[0]) from e
-        bridge = None
-        try:
-            root = ET.fromstring(network.XMLDesc(0))
-            element = root.find("bridge")
-            bridge = element.get("name") if element is not None else None
-        except (libvirt.libvirtError, ET.ParseError):
-            pass
+        facts = network_facts(network)
         return {
-            "name": network.name(),
-            "state": "active" if network.isActive() else "inactive",
-            "bridge": bridge,
-            # The binding's getter is `autostart()`; `getAutostart` is what this
-            # file said, and it is not a method, so the command never answered.
-            "autostart": bool(network.autostart()),
+            "name": facts["name"],
+            "state": _state(facts["active"]),
+            "bridge": facts["bridge_name"],
+            "autostart": facts["autostart"],
         }
 
 
