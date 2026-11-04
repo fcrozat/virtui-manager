@@ -705,6 +705,74 @@ class TestDeployFromConfig(unittest.TestCase):
             },
         )
 
+    def _install_cfg(self, **extra):
+        """A config that installs from media, the other half of the deploy file."""
+        cfg = {
+            "server": "local",
+            "vm_name": "web01",
+            "vm_type": "server",
+            "iso": {"source": "url", "url": "https://x/y.iso"},
+        }
+        cfg.update(extra)
+        return self._write_cfg(cfg)
+
+    def _domain_that_is_active(self):
+        """A domain like libvirt answers: isActive() is the integer 1, not True."""
+        domain = MagicMock()
+        domain.isActive.return_value = 1
+        return domain
+
+    def _deploy_an_install(self, cfg_path):
+        """Run an install deploy past the point where the answer is built."""
+        conn = MagicMock()
+        conn.lookupByName.side_effect = self._no_domain_error()
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+        with (
+            patch("vmanager.vmanager_cmd.ensure_default_pool", return_value=True),
+            patch("vmanager.vmanager_cmd.ensure_default_network"),
+            patch("vmanager.vmanager_cmd.list_storage_pools"),
+            patch("vmanager.vmanager_cmd.list_networks"),
+            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov,
+            patch("sys.stdout", MagicMock()),
+            redirect_stdout(io.StringIO()),
+        ):
+            mock_prov.return_value.provision_vm.return_value = self._domain_that_is_active()
+            return self.cmd.deploy_from_config(cfg_path)
+
+    def _deploy_a_boot_volume(self, cfg_path):
+        """Run a boot-a-volume deploy past the point where the answer is built."""
+        conn = MagicMock()
+        conn.lookupByName.side_effect = self._no_domain_error()
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+        conn.storagePoolLookupByName.return_value = self._pool_with(
+            "sidekick-worker01", "sidekick-worker01-seed"
+        )
+        with (
+            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov,
+            patch("sys.stdout", MagicMock()),
+            redirect_stdout(io.StringIO()),
+        ):
+            mock_prov.return_value.provision_existing_volume.return_value = (
+                self._domain_that_is_active()
+            )
+            return self.cmd.deploy_from_config(cfg_path)
+
+    def test_an_install_answers_running_as_a_boolean(self):
+        """`running` is one type on both routes: a caller can write `is True`."""
+        result = self._deploy_an_install(self._install_cfg())
+
+        answer = json.loads(json.dumps(result))
+        self.assertIs(answer["running"], True)
+
+    def test_a_boot_deploy_answers_running_as_a_boolean(self):
+        """The same field, the same type, whatever made the machine."""
+        result = self._deploy_a_boot_volume(self._boot_cfg())
+
+        answer = json.loads(json.dumps(result))
+        self.assertIs(answer["running"], True)
+
     def test_deploy_in_machine_mode_reports_a_provisioning_failure(self):
         from vmanager.machine_mode import EXIT_OPERATION, MachineError, MachineSession
 

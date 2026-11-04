@@ -512,6 +512,23 @@ The last object on stdout is the result of the call:
 {"ok": false, "command": "deploy", "code": "already_exists", "message": "VM 'web01' already exists."}
 ```
 
+What a `deploy` answers, in `data`:
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `domain` | string | the machine the command made. |
+| `server` | string | the hypervisor it was made on. |
+| `storage_pool` | string | the pool its disk lives in. |
+| `network` | string | the network it is attached to. |
+| `firmware` | string | `uefi` or `bios`. |
+| `graphics` | string | the graphics device it was given. |
+| `memory_mb` | number | memory in megabytes. |
+| `vcpu` | number | virtual CPUs. |
+| `disk_gb` | number | disk size, only when the file set one. |
+| `automated_install` | boolean | whether an auto-install profile was generated. |
+| `dryrun` | boolean | `true` when nothing was changed. |
+| `running` | boolean | whether the machine runs as the command answers — `true` or `false` on both routes, never a number. |
+
 Before it, a long command may report what it is doing, one event per line:
 
 ```json

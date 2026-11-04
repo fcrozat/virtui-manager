@@ -4374,7 +4374,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                     vcpu,
                     disk_size_gb,
                     automation_config,
-                    running=domain.isActive(),
+                    running=bool(domain.isActive()),
                 )
             self._deploy_fail(
                 "Provisioning did not return a domain.", EXIT_OPERATION, "provision_failed"
