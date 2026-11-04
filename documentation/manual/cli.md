@@ -501,8 +501,14 @@ The last object on stdout is the result of the call:
 Before it, a long command may report what it is doing, one event per line:
 
 ```json
-{"event": "progress", "stage": "downloading", "message": "Downloading ISO", "percent": 45}
+{"event": "progress", "stage": "install", "message": "Downloading the ISO", "percent": 45}
 ```
+
+`stage` says which part of the command is talking and is one of a small fixed
+set: `install` for a machine built from install media, `boot` for one booted
+from a volume the pool already holds. `message` is the detail — text for a
+human, never the stage repeated — and `percent` is how far along the command
+thinks it is, from 0 to 100.
 
 ### Resource commands
 

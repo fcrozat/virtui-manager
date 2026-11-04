@@ -37,6 +37,8 @@ from .machine_mode import (
     EXIT_NOT_FOUND,
     EXIT_OPERATION,
     EXIT_USAGE,
+    STAGE_BOOT,
+    STAGE_INSTALL,
     MachineError,
     MachineSession,
     run_command,
@@ -4293,7 +4295,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
         def cli_progress_callback(stage, percent):
             if self.machine is not None:
-                self.machine.progress(stage, stage, percent)
+                # ``stage`` here is the provisioner's own line of text, which is
+                # the message of the contract; the stage names the route.
+                self.machine.progress(STAGE_INSTALL, stage, percent)
                 return
             columns, _ = shutil.get_terminal_size()
             sys.stdout.write(f"\r[{percent}%] {stage}".ljust(columns - 1))
@@ -4461,7 +4465,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
         def cli_progress_callback(stage, percent=None):
             if self.machine is not None:
-                self.machine.progress(stage, stage, percent)
+                self.machine.progress(STAGE_BOOT, stage, percent)
                 return
 
         try:

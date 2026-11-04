@@ -115,6 +115,19 @@ class VolumeBootXmlTest(unittest.TestCase):
         )
         domain.create.assert_not_called()
 
+    def test_progress_arrives_as_a_message_and_a_percentage(self):
+        """Both provisioners report progress the same way: (message, percent).
+
+        The contract `provision_vm` and the machine envelope share; a boot that
+        reports (percent, message) instead puts numbers in the stage field.
+        """
+        events = []
+        self.boot(progress_callback=lambda *args: events.append(args))
+        self.assertIn(("Defining the machine", 40), events)
+        for message, percent in events:
+            self.assertIsInstance(message, str)
+            self.assertIsInstance(percent, int)
+
     def test_a_domain_libvirt_refuses_is_an_error_the_caller_reads(self):
         self.conn.defineXML.side_effect = RuntimeError("refused")
         with self.assertRaises(RuntimeError):

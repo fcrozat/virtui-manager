@@ -500,9 +500,49 @@ class TestDeployFromConfig(unittest.TestCase):
 
         self.assertEqual(
             json.loads(stream.getvalue()),
-            {"event": "progress", "message": "downloading", "percent": 45, "stage": "downloading"},
+            {"event": "progress", "stage": "install", "message": "downloading", "percent": 45},
         )
         self.assertTrue(result["running"])
+
+    def test_a_boot_deploy_reports_progress_with_a_stage_of_its_own(self):
+        from vmanager.machine_mode import MachineSession
+
+        cfg_path = self._boot_cfg()
+        conn = MagicMock()
+        conn.lookupByName.side_effect = self._no_domain_error()
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+        conn.storagePoolLookupByName.return_value = self._pool_with(
+            "sidekick-worker01", "sidekick-worker01-seed"
+        )
+
+        def provision(**kwargs):
+            kwargs["progress_callback"]("Defining the machine", 40)
+            domain = MagicMock()
+            domain.isActive.return_value = True
+            return domain
+
+        stream = io.StringIO()
+        with (
+            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov,
+            patch("sys.stdout", MagicMock()),
+            redirect_stdout(io.StringIO()),
+        ):
+            mock_prov.return_value.provision_existing_volume.side_effect = provision
+            self.cmd.deploy_from_config(
+                cfg_path, session=MachineSession("deploy", stdout=stream)
+            )
+
+        events = [json.loads(line) for line in stream.getvalue().splitlines()]
+        self.assertEqual(
+            events[0],
+            {
+                "event": "progress",
+                "stage": "boot",
+                "message": "Defining the machine",
+                "percent": 40,
+            },
+        )
 
     def test_deploy_in_machine_mode_reports_a_provisioning_failure(self):
         from vmanager.machine_mode import EXIT_OPERATION, MachineError, MachineSession

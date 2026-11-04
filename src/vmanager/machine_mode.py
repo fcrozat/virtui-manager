@@ -32,6 +32,12 @@ EXIT_OPERATION = 7  # the hypervisor refused, or the operation failed
 EXIT_TIMEOUT = 8  # a wait ran out
 EXIT_UNSUPPORTED = 9  # command has no machine-readable result (older vmc)
 
+# The stage a progress event names, so a caller can group events without
+# reading prose. The ``message`` carries the detail; the stage says which part
+# of a long command is talking. Documented in documentation/manual/cli.md.
+STAGE_INSTALL = "install"  # deploying a machine from install media
+STAGE_BOOT = "boot"  # deploying a machine from a volume the pool holds
+
 
 class MachineError(Exception):
     """A failure with the exit status and the code the caller is told about."""

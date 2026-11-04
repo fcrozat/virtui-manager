@@ -2443,7 +2443,7 @@ class VMProvisioner:
         boot_device: str = "disk",
         metadata: Dict[str, Any] | None = None,
         start: bool = True,
-        progress_callback: Optional[Callable[[int, str], None]] = None,
+        progress_callback: Optional[Callable[[str, int], None]] = None,
     ) -> libvirt.virDomain:
         """Define a machine that boots a disk which already exists.
 
@@ -2468,11 +2468,13 @@ class VMProvisioner:
         Returns the defined domain.
         """
 
-        def report(progress: int, message: str = None) -> None:
+        # (message, percent), the shape `provision_vm` and the machine contract
+        # use: a caller cannot put a percentage in a stage field.
+        def report(message: str, percent: int) -> None:
             if progress_callback:
-                progress_callback(progress, message)
+                progress_callback(message, percent)
             else:
-                logging.info(f"[{progress}%] {message}")
+                logging.info(f"[{percent}%] {message}")
 
         machine_types = get_latest_machine_types(self.conn, self.host_arch)
         default_machine = machine_types["pc-q35"] if boot_uefi else machine_types["pc-i440fx"]
@@ -2480,12 +2482,12 @@ class VMProvisioner:
 
         loader_path = nvram_path = None
         if boot_uefi:
-            report(20, "Preparing the UEFI variables")
+            report("Preparing the UEFI variables", 20)
             loader_path, nvram_path = self._setup_uefi_nvram(
                 vm_name, storage_pool_name, VMType.SERVER
             )
 
-        report(40, "Defining the machine")
+        report("Defining the machine", 40)
         xml = self._volume_boot_xml(
             vm_name=vm_name,
             disk_path=disk_path,
@@ -2508,14 +2510,14 @@ class VMProvisioner:
             raise RuntimeError(f"libvirt refused the machine: {e}") from e
 
         if start:
-            report(60, "Starting the machine")
+            report("Starting the machine", 60)
             try:
                 if not domain.isActive():
                     domain.create(0)
             except libvirt.libvirtError as e:
                 raise RuntimeError(f"The machine is defined but would not start: {e}") from e
 
-        report(100, f"{vm_name} is {'running' if start else 'defined'}")
+        report(f"{vm_name} is {'running' if start else 'defined'}", 100)
         return domain
 
     def _volume_boot_xml(
