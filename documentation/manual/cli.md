@@ -301,6 +301,20 @@ runs fully non-interactively. This works for local and remote servers alike.
 *   **`vmc --json <file.json> [--dryrun]`** (outside the CLI): loads the JSON, connects to the server named in it and provisions the VM. `--dryrun` prints a summary of what would happen without provisioning anything.
 *   **`deploy_vm <file_or_name> [--dryrun]`** (interactive, inside the CLI): the in-shell equivalent of `vmc --json` — loads the JSON, connects to the server named in it and provisions the VM. `<file_or_name>` may be a full path or a bare filename looked up in `~/.config/virtui-manager/deploy/` (tab-completes the available files).
 
+The hypervisor a deploy goes to is the `server` field of the file, so a deploy
+needs no `-u/--uri`. That flag is how one file goes somewhere else: given `-u`,
+the deploy connects to the uri instead of the file's `server`, and the `server`
+of the answer names the hypervisor the machine was really made on, so you can
+see the override took effect.
+
+```bash
+# The file says "server": "Localhost", so this goes there ...
+$ vmc --json ~/deploy/web01.json
+# ... and this builds the same machine on another hypervisor, with no edit
+$ vmc -u qemu+ssh://root@build-box/system --json ~/deploy/web01.json
+{"ok": true, "command": "deploy", "data": {"domain": "web01", "server": "build-box", ...}}
+```
+
 When the config enables an unattended install (`autoinstall.enabled`), the deploy prints the location and HTTP URL of the generated auto-install profile right after provisioning finishes. The file is served from a temporary directory while the VM installs, so you can inspect it (packages, SCC, baked-in post-install commands) if the auto-install does not behave as expected.
 
 ```bash
@@ -517,7 +531,7 @@ What a `deploy` answers, in `data`:
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `domain` | string | the machine the command made. |
-| `server` | string | the hypervisor it was made on. |
+| `server` | string | the hypervisor it was actually made on — the file's `server`, or the `-u` that overrode it. |
 | `storage_pool` | string | the pool its disk lives in. |
 | `network` | string | the network it is attached to. |
 | `firmware` | string | `uefi` or `bios`. |
@@ -609,10 +623,13 @@ $ vmc -u qemu:///system --machine -c "machine info"
 $ vmc -u qemu+ssh://root@h1/system --machine --json ~/deploy/web01.json
 ```
 
-With `--json`, the uri replaces the `server` field of the deployment file, so
-one file can be deployed anywhere. Without `-u`, `--json` connects to the
-`server` of the file, and `-c` to the configured servers as before. A `-u` the
-hypervisor refuses is status 4. Like every other message, the uri is sanitized:
+With `--json` the uri **takes precedence over** the `server` field of the
+deployment file: the file says what machine to build, `-u` says which
+hypervisor builds it, and one file can be deployed to as many of them as you
+like. Without `-u`, `--json` connects to the `server` of the file, and `-c` to
+the configured servers as before. The `server` of the answer is the hypervisor
+the command actually used, so a caller can check the override took effect rather
+than take it on trust. A `-u` the hypervisor refuses is status 4. Like every other message, the uri is sanitized:
 credentials it carries are not repeated back.
 
 ### Exit statuses

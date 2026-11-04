@@ -5373,7 +5373,8 @@ def main():
         help=(
             "Connect to this libvirt uri (qemu:///system, qemu+ssh://user@host/system) "
             "and to nothing else, instead of the servers marked autoconnect in the "
-            "configuration"
+            "configuration; with --json, instead of the server field of the "
+            "deployment file"
         ),
     )
     parser.add_argument(

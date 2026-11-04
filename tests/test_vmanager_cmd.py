@@ -1233,6 +1233,41 @@ class TestUriOption(unittest.TestCase):
             self.cmd.deploy_from_config(cfg)
         self.assertEqual(calls, ["qemu:///system"])
 
+    def test_the_answer_names_the_hypervisor_the_override_used(self):
+        """A caller can see the override took effect: `server` says where it went."""
+        import libvirt
+
+        class NoDomainError(libvirt.libvirtError):
+            def get_error_code(self):
+                return libvirt.VIR_ERR_NO_DOMAIN
+
+        cfg = self._write_cfg(
+            {
+                "server": "local",  # the file names one hypervisor ...
+                "vm_name": "v",
+                "vm_type": "server",
+                "iso": {"source": "url", "url": "http://h/SLE-15-SP1.iso"},
+            }
+        )
+        self.cmd.default_uri = "qemu+ssh://root@h1/system"  # ... and -u sends it elsewhere
+        conn = MagicMock()
+        conn.lookupByName.side_effect = NoDomainError("no domain")
+        self.cmd.active_connections["h1"] = conn
+        self.cmd._connect_one = MagicMock(return_value="h1")
+        with (
+            patch("vmanager.vmanager_cmd.ensure_default_pool", return_value=True),
+            patch("vmanager.vmanager_cmd.ensure_default_network"),
+            patch("vmanager.vmanager_cmd.list_storage_pools"),
+            patch("vmanager.vmanager_cmd.list_networks"),
+            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov,
+            patch("sys.stdout", MagicMock()),
+            redirect_stdout(io.StringIO()),
+        ):
+            mock_prov.return_value.provision_vm.return_value = MagicMock()
+            result = self.cmd.deploy_from_config(cfg)
+
+        self.assertEqual(result["server"], "h1")
+
     def _write_cfg(self, obj):
         import json
         import tempfile
