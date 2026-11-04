@@ -317,6 +317,47 @@ class PoolCommandTest(unittest.TestCase):
         self.assertEqual(raised.exception.status, EXIT_CONNECTION)
 
 
+class SubcommandVocabularyTest(unittest.TestCase):
+    """What a resource command answers when the word after it is not one it has.
+
+    The vocabulary is the one the dispatch reads, so these are the answers a
+    scripted caller gets — and the order they come in: the subcommand is refused
+    before anything about its flags is looked at.
+    """
+
+    def setUp(self):
+        self.conn = FakeConnection()
+        self.conn.pools["default"] = FakePool("default")
+
+    def assert_usage(self, command, message):
+        with self.assertRaises(MachineError) as raised:
+            answer(self.conn, command)
+        self.assertEqual(raised.exception.status, EXIT_USAGE)
+        self.assertEqual(str(raised.exception), message)
+
+    def test_a_command_alone_says_what_is_missing(self):
+        with self.assertRaises(MachineError) as raised:
+            answer(self.conn, "pool")
+        self.assertEqual(raised.exception.status, EXIT_USAGE)
+        # The word `None` is what a caller of an older vmc was answered with here.
+        self.assertNotIn("None", str(raised.exception))
+        self.assertIn("pool needs a subcommand", str(raised.exception))
+        self.assertIn("list", str(raised.exception))
+
+    def test_a_word_the_command_does_not_know_is_named(self):
+        self.assert_usage("pool nosuch", "Unknown pool subcommand 'nosuch'.")
+
+    def test_the_unknown_subcommand_is_answered_before_its_flags(self):
+        self.assert_usage("pool nosuch --roomy", "Unknown pool subcommand 'nosuch'.")
+
+    def test_a_command_acting_on_one_thing_asks_for_its_name(self):
+        self.assert_usage("pool info", "pool info needs a name.")
+        self.assert_usage("domain state", "domain state needs a name.")
+
+    def test_a_command_that_takes_a_name_as_a_flag_asks_for_the_flag(self):
+        self.assert_usage("volume info --pool default", "volume info needs --name.")
+
+
 class VolumeCommandTest(unittest.TestCase):
     def setUp(self):
         self.conn = FakeConnection()
@@ -571,9 +612,9 @@ class NetworkAndHostTest(unittest.TestCase):
         self.conn.networks["default"] = MagicMock()
         self.conn.networks["default"].name.return_value = "default"
         self.conn.networks["default"].isActive.return_value = 1
-        self.conn.networks[
-            "default"
-        ].XMLDesc.return_value = "<network><bridge name='virbr0'/></network>"
+        self.conn.networks["default"].XMLDesc.return_value = (
+            "<network><bridge name='virbr0'/></network>"
+        )
 
     def test_network_list_reports_what_is_there(self):
         result = answer(self.conn, "network list")

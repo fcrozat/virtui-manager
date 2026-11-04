@@ -153,6 +153,13 @@ def _read_subcommand(command, args):
     real. Reading the subject here too means a command cannot forget to.
     """
     subcommand = args[0] if args else None
+    if subcommand is None:
+        # A command spoken alone: the vocabulary it could have gone on to is the
+        # answer that helps, and it is the same list the guard below reads.
+        known = ", ".join(
+            sorted(word[len(command) + 1 :] for word in OPTIONS if word.startswith(f"{command} "))
+        )
+        raise MachineError(f"{command} needs a subcommand ({known}).", EXIT_USAGE, "usage")
     path = f"{command} {subcommand}"
     if path not in OPTIONS:
         raise MachineError(f"Unknown {command} subcommand '{subcommand}'.", EXIT_USAGE, "usage")
