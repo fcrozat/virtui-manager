@@ -737,6 +737,35 @@ class TestDeployFromConfig(unittest.TestCase):
         # No autoinstall -> no automation -> show_automation_path stays False.
         self.assertFalse(kwargs.get("show_automation_path"))
 
+    def test_an_install_keeps_the_metadata_the_caller_gave(self):
+        """The install route is the half of the deploy file most callers use."""
+        cfg_path = self._write_cfg(
+            {
+                "server": "local",
+                "vm_name": "web01",
+                "vm_type": "server",
+                "iso": {"source": "url", "url": "https://x/y.iso"},
+                "metadata": {"mcp-sidekick": "instance", "instance": "worker01"},
+            }
+        )
+        conn = MagicMock()
+        conn.lookupByName.side_effect = self._no_domain_error()
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+
+        with (
+            patch("vmanager.vmanager_cmd.ensure_default_pool", return_value=True),
+            patch("vmanager.vmanager_cmd.ensure_default_network"),
+            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov,
+            patch("vmanager.vmanager_cmd.list_storage_pools"),
+            patch("vmanager.vmanager_cmd.list_networks"),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.cmd.deploy_from_config(cfg_path)
+
+        _, kwargs = mock_prov.return_value.provision_vm.call_args
+        self.assertEqual(kwargs["metadata"]["instance"], "worker01")
+
     def test_deploy_vm_no_args_shows_usage(self):
         with redirect_stdout(io.StringIO()) as buf:
             self.cmd.do_deploy_vm("")

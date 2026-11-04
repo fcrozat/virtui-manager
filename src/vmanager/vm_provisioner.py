@@ -1124,6 +1124,7 @@ class VMProvisioner:
         os_version: str | None = None,
         network_name: str = "default",
         ovmf_debug: bool = False,
+        metadata: dict[str, Any] | None = None,
     ) -> str:
         """
         Generates the Libvirt XML for the VM based on the type and default settings.
@@ -1369,6 +1370,11 @@ class VMProvisioner:
     <policy>{sev_caps["policy"]}</policy>
   </launchSecurity>
 """
+
+        # The caller's own facts about the machine, in a namespace of ours, where
+        # libvirt allows them: after the lifecycle elements, before the devices.
+        if metadata:
+            xml += self._metadata_xml(metadata)
 
         xml += "  <devices>\n"
 
@@ -2461,8 +2467,8 @@ class VMProvisioner:
                 the NoCloud seed a machine reads its name, key and user-data from.
             boot_device: `disk`, or `cdrom` when the seed (or the media the
                 machine was built from) is what should boot first.
-            metadata: Kept in the domain's `<metadata>` and reported back by
-                `vmc domain info`; nothing here interprets it.
+            metadata: Kept in the domain's `<metadata>` and read back by
+                `vmc domain metadata <name>`; nothing here interprets it.
             start: Whether to boot it, or only define it.
 
         Returns the defined domain.
@@ -2611,7 +2617,7 @@ class VMProvisioner:
 
     @staticmethod
     def _metadata_xml(metadata: Dict[str, Any]) -> str:
-        """A caller's own facts about a machine, kept in its XML and reported back.
+        """A caller's own facts about a machine, kept in its XML and read back.
 
         They live in a namespace of ours so another tool's metadata sits beside
         them untouched. Values are escaped: a name a caller typed cannot close the
@@ -2644,6 +2650,7 @@ class VMProvisioner:
         show_automation_path: bool = False,
         network_name: str = "default",
         ovmf_debug: bool = False,
+        metadata: dict[str, Any] | None = None,
     ) -> libvirt.virDomain:
         """
         Orchestrates the VM provisioning process.
@@ -2662,6 +2669,8 @@ class VMProvisioner:
             boot_uefi: Whether to use UEFI boot.
             configure_before_install: If True, defines VM and shows details modal before starting.
             show_config_modal_callback: Optional callback to show configuration modal. Takes (domain) as parameters.
+            metadata: Kept in the domain's `<metadata>` the way
+                `provision_existing_volume` keeps it; nothing here interprets it.
         """
 
         def report(stage, percent):
@@ -3311,6 +3320,7 @@ class VMProvisioner:
                 os_version=os_version,
                 network_name=network_name,
                 ovmf_debug=ovmf_debug,
+                metadata=metadata,
             )
 
             # Define the VM
@@ -3468,6 +3478,7 @@ class VMProvisioner:
             os_version=os_version,
             network_name=network_name,
             ovmf_debug=ovmf_debug,
+            metadata=metadata,
         )
 
         report(StaticText.PROVISIONING_CONFIGURING_VM_XML, 90)

@@ -37,6 +37,7 @@ from .storage_manager import (
     create_storage_pool,
     delete_volume,
 )
+from .vm_provisioner import METADATA_NS
 from .vm_queries import get_vm_network_ip
 
 # Where the target of a pool created by name goes, as the images of a pool the
@@ -90,6 +91,7 @@ OPTIONS = {
     "domain list": ("prefix",),
     "domain state": (),
     "domain address": (),
+    "domain metadata": (),
     "domain start": (),
     "domain shutdown": (),
     "domain reboot": (),
@@ -488,7 +490,7 @@ def _volume_upload(conn, options, session):
 
 @machine_command("domain")
 def _domain_command(app, args, session):
-    """``domain list|state|address|start|shutdown|reboot|destroy|undefine <name>``."""
+    """``domain list|state|address|metadata|start|shutdown|reboot|destroy|undefine <name>``."""
     conn = _connection(app)
     subcommand = args[0] if args else None
     positional, options = _words(args[1:])
@@ -521,6 +523,9 @@ def _domain_command(app, args, session):
     if subcommand == "address":
         return _domain_address(domain, options)
 
+    if subcommand == "metadata":
+        return {"name": name, "metadata": _domain_metadata(domain)}
+
     actions = {
         "start": lambda: domain.create(0),
         "shutdown": lambda: domain.poweroff(),
@@ -545,6 +550,35 @@ def _domain_command(app, args, session):
         "name": name,
         "state": _domain_state(domain) if subcommand != "undefine" else "undefined",
     }
+
+
+def _domain_metadata(domain):
+    """The facts the caller stored on a domain, in the namespace of ours it uses.
+
+    libvirt answers with the element as text. A domain carrying none of them is
+    an answer, not a failure: the caller asked what it left there, and nothing
+    is what is there.
+    """
+    try:
+        stored = domain.metadata(libvirt.VIR_DOMAIN_METADATA_ELEMENT, METADATA_NS)
+    except libvirt.libvirtError:
+        return {}
+    if not stored:
+        return {}
+    try:
+        properties = ET.fromstring(stored)
+    except ET.ParseError as e:
+        raise MachineError(
+            f"Could not read the metadata of '{domain.name()}': {e}",
+            EXIT_OPERATION,
+            "operation_failed",
+        ) from e
+    prefix = f"{{{METADATA_NS}}}"
+    kept = {}
+    for child in properties:
+        key = child.tag[len(prefix) :] if child.tag.startswith(prefix) else child.tag
+        kept[key] = child.text or ""
+    return kept
 
 
 def _refuse_if_running(domain, verb):

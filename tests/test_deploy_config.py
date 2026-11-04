@@ -426,6 +426,34 @@ class TestBootConfig(unittest.TestCase):
             self._boot(metadata={"a": {"b": "c"}})
         self.assertIn("single value", str(raised.exception))
 
+    def test_a_metadata_key_xml_cannot_use_is_refused(self):
+        """A key becomes an element name, so libvirt would refuse the domain."""
+        with self.assertRaises(DeployConfigError) as raised:
+            self._boot(metadata={"who owns": "ops"})
+        self.assertIn("who owns", str(raised.exception))
+
+    def test_a_metadata_key_beginning_with_a_digit_is_refused(self):
+        with self.assertRaises(DeployConfigError):
+            self._boot(metadata={"1st": "ops"})
+
+    def test_a_metadata_key_in_the_reserved_prefix_is_refused(self):
+        with self.assertRaises(DeployConfigError):
+            self._boot(metadata={"xml:owner": "ops"})
+
+    def test_a_key_that_would_name_a_prefix_is_refused(self):
+        """`ns:owner` would name a prefix nothing declares: the XML is refused."""
+        import xml.etree.ElementTree as ET
+
+        with self.assertRaises(DeployConfigError):
+            self._boot(metadata={"ns:owner": "ops"})
+        # What the check stands against: libvirt would answer the same way.
+        with self.assertRaises(ET.ParseError):
+            ET.fromstring("<properties><ns:owner>ops</ns:owner></properties>")
+
+    def test_a_key_of_the_shape_the_tool_writes_is_accepted(self):
+        cfg = self._boot(metadata={"mcp-sidekick": "instance", "task_1": "worker01"})
+        self.assertEqual(cfg["metadata"]["mcp-sidekick"], "instance")
+
     def test_boot_is_either_disk_or_cdrom(self):
         with self.assertRaises(DeployConfigError) as raised:
             self._boot(boot="floppy")

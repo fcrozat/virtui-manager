@@ -407,9 +407,12 @@ the storage pool — one that `volume upload` put there, or one that
 *   **`seed.volume`** — a volume attached as a second, read-only `cdrom`.
     Whatever is in it (cloud-init, Ignition, a tarball) is what the image on the
     disk reads on first boot.
-*   **`metadata`** — strings stored on the domain, in their own namespace, so a
-    caller can find its own machines again and know what each is for. A value
-    cannot escape the element it is written into.
+*   **`metadata`** — strings stored on the domain, in its own namespace, so a
+    caller can find its machines again and know what each is for. Both halves of
+    the deploy file keep them, booting a volume and installing from media, and
+    `domain metadata <name>` reads them back. A key becomes an element name, so
+    one XML cannot use is refused as a bad file (status 3) before anything is
+    defined; a value cannot escape the element it is written into.
 *   **`boot`** — `disk` (default when there is no installer) or `cdrom`; with a
     seed present this decides which of the two the firmware tries first.
 
@@ -545,6 +548,7 @@ $ vmc --machine -c "pool create sidekick --path /srv/sidekick"
 | `domain list [--prefix X]` | the domains and their state; `--prefix` keeps the names that start with it. |
 | `domain state <name>` | whether it runs, and whether libvirt has it at all. |
 | `domain address <name>` | its lease address, `ipv4` null when it has none yet. |
+| `domain metadata <name>` | the strings the caller stored on it, empty when it stored none. |
 | `domain start\|shutdown\|destroy\|reboot <name>` | the domain, after it was told. |
 | `network list` / `network info --network N` | the networks and their state, and `active` for a network without libvirt state. |
 | `machine info` | protocol version, name, version, and every command this vmc answers. |

@@ -14,7 +14,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
-from vmanager.vm_provisioner import METADATA_NS, VMProvisioner
+from vmanager.vm_provisioner import METADATA_NS, VMProvisioner, VMType
 
 
 def provisioner():
@@ -25,6 +25,38 @@ def provisioner():
         "</arch></guest></capabilities>"
     )
     return VMProvisioner(conn), conn
+
+
+class InstallXmlTest(unittest.TestCase):
+    """The other half of the deploy file: installing from media.
+
+    `generate_xml` is what that route hands libvirt, so it is where a fact the
+    caller supplied either reaches the domain or does not.
+    """
+
+    def setUp(self):
+        self.provisioner, _ = provisioner()
+        self.provisioner.host_arch = "x86_64"
+
+    def install(self, **kwargs):
+        args = dict(
+            vm_name="sidekick-worker01",
+            vm_type=VMType.SERVER,
+            disk_path="/var/lib/libvirt/images/sidekick-worker01.qcow2",
+            iso_path="/var/lib/libvirt/images/SLE-15.iso",
+        )
+        args.update(kwargs)
+        return ET.fromstring(self.provisioner.generate_xml(**args))
+
+    def test_the_metadata_of_the_caller_is_kept_in_the_machine(self):
+        xml = self.install(metadata={"owner": "mcp-sidekick", "instance": "worker01"})
+        properties = xml.find(f"metadata/{{{METADATA_NS}}}properties")
+        self.assertEqual(properties.find(f"{{{METADATA_NS}}}owner").text, "mcp-sidekick")
+        self.assertEqual(properties.find(f"{{{METADATA_NS}}}instance").text, "worker01")
+
+    def test_an_install_with_nothing_to_keep_has_no_empty_element(self):
+        xml = self.install()
+        self.assertIsNone(xml.find(f"metadata/{{{METADATA_NS}}}properties"))
 
 
 class VolumeBootXmlTest(unittest.TestCase):

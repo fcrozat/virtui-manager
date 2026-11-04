@@ -19,6 +19,7 @@ to the provisioner by the CLI.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict
 
@@ -27,6 +28,14 @@ from .vm_provisioner import VMType, VM_TYPE_DEFAULTS
 
 class DeployConfigError(Exception):
     """Raised when a deployment config file is missing, malformed or invalid."""
+
+
+# Each metadata key is written as an element name inside the one namespace the
+# tool declares, so it is held to what can be such a name: XML's characters, less
+# the colon, which would call for a prefix nothing declares; and away from `xml`,
+# which XML reserves. Checked here, where the answer is a config error, rather
+# than by libvirt once the disk and the seed have been placed.
+XML_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_.-]*\Z")
 
 
 # Allowed values for the ``iso.source`` field.
@@ -162,6 +171,10 @@ def _validate(cfg: Dict[str, Any]) -> None:
             if not isinstance(value, (str, int, float, bool)):
                 raise DeployConfigError(
                     f"metadata.{key} must be a single value, not {type(value).__name__}"
+                )
+            if XML_NAME.match(str(key)) is None or str(key).lower().startswith("xml"):
+                raise DeployConfigError(
+                    f"metadata.{key} cannot be kept on a domain: '{key}' is not a name XML allows"
                 )
         cfg["metadata"] = {str(k): str(v) for k, v in metadata.items()}
 

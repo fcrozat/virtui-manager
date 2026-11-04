@@ -149,6 +149,10 @@ class FakeDomain:
     def isActive(self):
         return 1 if self.active else 0
 
+    def metadata(self, _type, uri):
+        # As libvirt answers a domain that carries nothing in that namespace.
+        raise libvirt.libvirtError(f"no metadata in {uri}")
+
     def create(self, _flags=0):
         self.actions.append("start")
         self.active = True
@@ -468,6 +472,38 @@ class DomainCommandTest(unittest.TestCase):
         with patch("vmanager.machine_resources.get_vm_network_ip", return_value=[]):
             result = answer(self.conn, "domain address sidekick-vm")
         self.assertIsNone(result["ipv4"])
+
+    def test_the_facts_a_caller_stored_come_back(self):
+        stored = (
+            "<properties xmlns='https://virtui-manager/metadata/1'>"
+            "<owner>mcp-sidekick</owner><instance>worker01</instance></properties>"
+        )
+        self.conn.domains["sidekick-vm"].metadata = lambda _type, _uri: stored
+        result = answer(self.conn, "domain metadata sidekick-vm")
+        self.assertEqual(result["name"], "sidekick-vm")
+        self.assertEqual(
+            result["metadata"], {"owner": "mcp-sidekick", "instance": "worker01"}
+        )
+
+    def test_a_machine_with_nothing_stored_answers_nothing(self):
+        """A caller asking what it left on a machine is not being told an error."""
+        self.assertEqual(answer(self.conn, "domain metadata quiet")["metadata"], {})
+
+    def test_what_the_provisioner_writes_the_command_reads(self):
+        """The namespace the writer uses is the namespace the reader asks for."""
+        import xml.etree.ElementTree as ET
+
+        from vmanager.vm_provisioner import METADATA_NS, VMProvisioner
+
+        written = ET.fromstring(
+            f"<root>{VMProvisioner._metadata_xml({'owner': 'mcp-sidekick'})}</root>"
+        )
+        stored = ET.tostring(written.find(f"metadata/{{{METADATA_NS}}}properties")).decode()
+        self.conn.domains["sidekick-vm"].metadata = lambda _type, _uri: stored
+        self.assertEqual(
+            answer(self.conn, "domain metadata sidekick-vm")["metadata"],
+            {"owner": "mcp-sidekick"},
+        )
 
     def test_powering_on_a_machine_starts_it(self):
         answer(self.conn, "domain start quiet")

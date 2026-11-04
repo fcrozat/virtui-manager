@@ -4338,6 +4338,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 show_automation_path=bool(automation_config),
                 progress_callback=cli_progress_callback,
                 network_name=network,
+                metadata=cfg["metadata"],
             )
             if domain:
                 print(f"\nSuccessfully provisioned VM '{vm_name}'.")
