@@ -531,6 +531,33 @@ class TestDeployFromConfig(unittest.TestCase):
         )
         self.assertEqual(kwargs["metadata"]["instance"], "worker01")
 
+    def test_an_install_attaches_the_seed_it_was_named(self):
+        """A seed belongs to the machine, not to the way the machine was made."""
+        result = self._deploy_an_install(
+            self._install_cfg(seed={"volume": "seed-a"}), pool=self._pool_with("seed-a")
+        )
+        self.assertEqual(self.install_request["seed_path"], "/var/lib/libvirt/images/seed-a.qcow2")
+        self.assertEqual(result["seed"], "seed-a")
+
+    def test_an_install_with_no_seed_has_nothing_to_attach(self):
+        result = self._deploy_an_install(self._install_cfg(), pool=self._pool_with())
+        self.assertIsNone(self.install_request["seed_path"])
+        self.assertNotIn("seed", result)
+
+    def test_an_install_naming_a_seed_the_pool_has_not_got_is_status_five(self):
+        """A missing seed is a missing resource, said before anything is made."""
+        from vmanager.machine_mode import EXIT_NOT_FOUND, MachineError, MachineSession
+
+        with self.assertRaises(MachineError) as raised:
+            self._deploy_an_install(
+                self._install_cfg(seed={"volume": "seed-a"}),
+                pool=self._pool_with(),
+                session=MachineSession("deploy"),
+            )
+        self.assertEqual(raised.exception.status, EXIT_NOT_FOUND)
+        self.assertEqual(raised.exception.code, "not_found")
+        self.assertIsNone(self.install_request)
+
     def test_a_deploy_naming_a_pool_that_is_not_there_is_status_five(self):
         """A pool that is not there is the pool's status, not a bad config file."""
         import libvirt
@@ -722,19 +749,26 @@ class TestDeployFromConfig(unittest.TestCase):
         domain.isActive.return_value = 1
         return domain
 
-    def _deploy_an_install(self, cfg_path, served=None):
+    def _deploy_an_install(self, cfg_path, served=None, pool=None, session=None):
         """Run an install deploy past the point where the answer is built.
 
         `served` is the auto-install profile the provisioner says it served, or
-        None when it generated none at all.
+        None when it generated none at all. `pool` is the storage pool the
+        hypervisor answers with, so a test can say which volumes exist.
+        What the provisioner was told is left in `self.install_request`, which
+        stays None when the deploy never reached it.
         """
         conn = MagicMock()
         conn.lookupByName.side_effect = self._no_domain_error()
         self.cmd.active_connections["local"] = conn
         self.cmd._connect_one = MagicMock(return_value="local")
+        if pool is not None:
+            conn.storagePoolLookupByName.return_value = pool
         domain = self._domain_that_is_active()
+        self.install_request = None
 
         def provision(**kwargs):
+            self.install_request = kwargs
             report = kwargs.get("autoinstall_report")
             if served is not None and report:
                 report(served)
@@ -750,7 +784,7 @@ class TestDeployFromConfig(unittest.TestCase):
             redirect_stdout(io.StringIO()),
         ):
             mock_prov.return_value.provision_vm.side_effect = provision
-            return self.cmd.deploy_from_config(cfg_path)
+            return self.cmd.deploy_from_config(cfg_path, session=session)
 
     def _deploy_a_boot_volume(self, cfg_path):
         """Run a boot-a-volume deploy past the point where the answer is built."""

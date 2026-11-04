@@ -1174,9 +1174,14 @@ class VMProvisioner:
         network_name: str = "default",
         ovmf_debug: bool = False,
         metadata: dict[str, Any] | None = None,
+        seed_path: str | None = None,
     ) -> str:
         """
         Generates the Libvirt XML for the VM based on the type and default settings.
+
+        `seed_path` is a read-only CD-ROM the guest reads its own configuration
+        from, attached beside the install media: a machine being installed can
+        still carry the data it will read on first boot.
         """
         # If boot_uefi is None, default to True for modern OSes
         if boot_uefi is None:
@@ -1445,6 +1450,19 @@ class VMProvisioner:
       <target dev='sda' bus='sata'/>
       <readonly/>
       <boot order='{cd_boot}'/>
+    </disk>
+"""
+
+        # The seed the caller named, read-only beside the media. No boot order:
+        # the media is what installs, and the seed is data. `sdb` because the
+        # media already sits on `sda`.
+        if seed_path:
+            xml += f"""
+    <disk type='file' device='cdrom'>
+      <driver name='qemu' type='raw'/>
+      <source file='{xml_value(seed_path)}'/>
+      <target dev='sdb' bus='sata'/>
+      <readonly/>
     </disk>
 """
 
@@ -2697,6 +2715,7 @@ class VMProvisioner:
         network_name: str = "default",
         ovmf_debug: bool = False,
         metadata: dict[str, Any] | None = None,
+        seed_path: str | None = None,
     ) -> libvirt.virDomain:
         """
         Orchestrates the VM provisioning process.
@@ -2717,6 +2736,9 @@ class VMProvisioner:
             show_config_modal_callback: Optional callback to show configuration modal. Takes (domain) as parameters.
             metadata: Kept in the domain's `<metadata>` the way
                 `provision_existing_volume` keeps it; nothing here interprets it.
+            seed_path: Path of a volume to attach as a second, read-only CD-ROM,
+                the same second disc `provision_existing_volume` attaches. The
+                machine being installed reads it later; it does not boot from it.
         """
 
         report = progress_reporter(progress_callback)
@@ -3365,6 +3387,7 @@ class VMProvisioner:
                 network_name=network_name,
                 ovmf_debug=ovmf_debug,
                 metadata=metadata,
+                seed_path=seed_path,
             )
 
             # Define the VM
@@ -3523,6 +3546,7 @@ class VMProvisioner:
             network_name=network_name,
             ovmf_debug=ovmf_debug,
             metadata=metadata,
+            seed_path=seed_path,
         )
 
         report(StaticText.PROVISIONING_DEFINING_VM, 90)

@@ -4261,7 +4261,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         # The pool the config names is the pool the machine lands in, so a name
         # that is not there is the pool's own answer, not a bad file.
         try:
-            conn.storagePoolLookupByName(cfg["storage_pool"])
+            pool = conn.storagePoolLookupByName(cfg["storage_pool"])
         except libvirt.libvirtError:
             self._deploy_fail(
                 f"No storage pool '{cfg['storage_pool']}' on {server_name}.",
@@ -4281,6 +4281,22 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         if not iso_url:
             self._deploy_fail("Could not resolve ISO from config.", EXIT_CONFIG, "iso_unresolvable")
             return
+
+        # A seed is a disc the guest reads its own configuration from, and it
+        # belongs to the machine rather than to the way the machine was made: an
+        # install attaches it read-only beside the media, as booting a volume
+        # does. A deploy that was given one and ignored it would start a machine
+        # with no data on purpose and say nothing about it.
+        seed_path = None
+        if cfg["seed_volume"]:
+            seed_path, _ = self._volume_path(pool, cfg["seed_volume"])
+            if seed_path is None:
+                self._deploy_fail(
+                    f"No seed volume '{cfg['seed_volume']}' in '{cfg['storage_pool']}'.",
+                    EXIT_NOT_FOUND,
+                    "not_found",
+                )
+                return
 
         vm_type, memory_mb, vcpu, disk_size_gb = resolve_vm_resources(cfg)
 
@@ -4320,6 +4336,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 automation_config,
                 dryrun=True,
             )
+            if cfg["seed_volume"]:
+                result["seed"] = cfg["seed_volume"]
+            return result
 
         def cli_progress_callback(stage, percent):
             if self.machine is not None:
@@ -4361,6 +4380,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 progress_callback=cli_progress_callback,
                 network_name=network,
                 metadata=cfg["metadata"],
+                seed_path=seed_path,
             )
             if domain:
                 print(f"\nSuccessfully provisioned VM '{vm_name}'.")
@@ -4369,7 +4389,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 elif cfg.get("start", True):
                     start_vm(domain)
                     print(f"VM '{vm_name}' started.")
-                return _deploy_result(
+                result = _deploy_result(
                     vm_name,
                     server_name,
                     storage_pool,
@@ -4383,6 +4403,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                     running=bool(domain.isActive()),
                     autoinstall=served_profile,
                 )
+                if cfg["seed_volume"]:
+                    result["seed"] = cfg["seed_volume"]
+                return result
             self._deploy_fail(
                 "Provisioning did not return a domain.", EXIT_OPERATION, "provision_failed"
             )
@@ -4415,6 +4438,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         disk = disk_size_gb if disk_size_gb else "default"
         print(f"Memory: {memory_mb} MB, vCPU: {vcpu}, Disk: {disk} GB")
         print(f"ISO: {iso_url}")
+        if cfg["seed_volume"]:
+            print(f"Seed CD-ROM: {cfg['seed_volume']}")
         print(f"Network: {network}")
         print(f"Storage Pool: {storage_pool}")
         print(f"Boot Mode: {'UEFI' if boot_uefi else 'BIOS'}")
@@ -4432,6 +4457,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 print(f"Post-install: Yes ({len(pi['commands'])} commands, baked into template)")
         else:
             print("Automated Install: No")
+
+    @staticmethod
+    def _volume_path(pool, name):
+        """Where a volume of this pool is on the host, and how it is formatted."""
+        try:
+            volume = pool.storageVolLookupByName(name)
+        except libvirt.libvirtError:
+            return None, None
+        return machine_resources.volume_path_and_format(volume)
 
     def _deploy_existing_volume(self, cfg, conn, provisioner, vm_name, server_name, dryrun=False):
         """Deploy the machine described by a `disk.volume` config: boot a disk, install nothing.
@@ -4459,12 +4493,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             _ensure_pool_active(pool)
 
         def volume_path(name):
-            """Where a volume of this pool is, and how it is formatted."""
-            try:
-                volume = pool.storageVolLookupByName(name)
-            except libvirt.libvirtError:
-                return None, None
-            return machine_resources.volume_path_and_format(volume)
+            return self._volume_path(pool, name)
 
         disk_path, disk_format = volume_path(disk_volume)
         would_create = False

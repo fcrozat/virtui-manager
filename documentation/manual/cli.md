@@ -420,7 +420,13 @@ the storage pool — one that `volume upload` put there, or one that
     else.
 *   **`seed.volume`** — a volume attached as a second, read-only `cdrom`.
     Whatever is in it (cloud-init, Ignition, a tarball) is what the image on the
-    disk reads on first boot.
+    disk reads on first boot. It belongs to the machine rather than to the way the
+    machine was made, so both halves of the deploy file take it: a machine being
+    installed carries the disc alongside its install media, and reads it when it
+    first boots the disk it was installed onto. There it is data only — the media
+    is what boots — and `boot` decides the order for a machine that boots a volume
+    it already has. A seed the pool has not got is a missing resource (status 5),
+    said before anything is defined.
 *   **`metadata`** — strings stored on the domain, in its own namespace, so a
     caller can find its machines again and know what each is for. Both halves of
     the deploy file keep them, booting a volume and installing from media, and
@@ -540,6 +546,7 @@ What a `deploy` answers, in `data`:
 | `vcpu` | number | virtual CPUs. |
 | `disk_gb` | number | disk size, only when the file set one. |
 | `automated_install` | boolean | whether an auto-install profile was generated. |
+| `seed` | string | the seed volume attached, when the file named one. |
 | `autoinstall` | object | where that profile is and the URL the guest was told to fetch it from: `directory`, `file`, `url`. Only there when one was generated, never an empty object. |
 | `dryrun` | boolean | `true` when nothing was changed. |
 | `running` | boolean | whether the machine runs as the command answers — `true` or `false` on both routes, never a number. |

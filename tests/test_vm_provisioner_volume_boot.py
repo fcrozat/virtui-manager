@@ -58,6 +58,32 @@ class InstallXmlTest(unittest.TestCase):
         xml = self.install()
         self.assertIsNone(xml.find(f"metadata/{{{METADATA_NS}}}properties"))
 
+    def cdroms(self, xml):
+        return [d for d in xml.find("devices") if d.get("device") == "cdrom"]
+
+    def test_a_seed_rides_alongside_the_install_media(self):
+        """A machine being installed can still carry the data it reads later."""
+        xml = self.install(seed_path="/var/lib/libvirt/images/sidekick-worker01-seed.iso")
+        self.assertEqual(len(self.cdroms(xml)), 2)
+        seed = self.cdroms(xml)[-1]
+        self.assertEqual(
+            seed.find("source").get("file"), "/var/lib/libvirt/images/sidekick-worker01-seed.iso"
+        )
+        self.assertIsNotNone(seed.find("readonly"))
+
+    def test_the_seed_is_not_a_thing_to_boot_from_when_installing(self):
+        """The media installs; a seed attached to it is data, not a boot device."""
+        xml = self.install(seed_path="/var/lib/libvirt/images/seed.iso")
+        self.assertIsNone(self.cdroms(xml)[-1].find("boot"))
+
+    def test_a_seed_has_a_place_of_its_own_the_media_is_not_it(self):
+        xml = self.install(seed_path="/var/lib/libvirt/images/seed.iso")
+        targets = [cdrom.find("target").get("dev") for cdrom in self.cdroms(xml)]
+        self.assertEqual(len(set(targets)), len(targets))
+
+    def test_an_install_with_no_seed_has_only_the_media(self):
+        self.assertEqual(len(self.cdroms(self.install())), 1)
+
 
 class VolumeBootXmlTest(unittest.TestCase):
     def setUp(self):
