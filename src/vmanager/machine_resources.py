@@ -75,6 +75,43 @@ def _words(args):
     return positional, options
 
 
+# The flags each subcommand takes. A flag outside this table is answered as the
+# mistake it is: ignoring one would report success as though it had been heeded.
+OPTIONS = {
+    "pool list": (),
+    "pool info": (),
+    "pool create": ("path",),
+    "volume list": ("pool",),
+    "volume info": ("pool", "name"),
+    "volume upload": ("pool", "name", "file", "format", "force"),
+    "volume create-overlay": ("pool", "name", "backing", "size", "force"),
+    "volume delete": ("pool", "name", "force"),
+    "volume rename": ("pool", "name", "new-name", "force"),
+    "domain list": ("prefix",),
+    "domain state": (),
+    "domain address": (),
+    "domain start": (),
+    "domain shutdown": (),
+    "domain reboot": (),
+    "domain destroy": (),
+    "domain undefine": (),
+    "network list": (),
+    "network info": (),
+    "host capabilities": (),
+    "host resources": (),
+}
+
+
+def _reject_unknown_flags(path, options):
+    """Refuse a flag this command has never heard of, naming it."""
+    allowed = OPTIONS.get(path)
+    if allowed is None:
+        return  # An unknown subcommand reports itself, below the dispatch.
+    for name in sorted(options):
+        if name not in allowed:
+            raise MachineError(f"{path} has no --{name} flag.", EXIT_USAGE, "usage")
+
+
 def _required(options, name, command):
     """The value of a mandatory option, or a usage error naming it."""
     value = options.get(name)
@@ -182,6 +219,7 @@ def _pool_command(app, args, _session):
     conn = _connection(app)
     subcommand = args[0] if args else None
     positional, options = _words(args[1:])
+    _reject_unknown_flags(f"pool {subcommand}", options)
 
     if subcommand == "list":
         entries = []
@@ -261,6 +299,7 @@ def _volume_command(app, args, session):
     conn = _connection(app)
     subcommand = args[0] if args else None
     positional, options = _words(args[1:])
+    _reject_unknown_flags(f"volume {subcommand}", options)
     if positional:
         raise MachineError("Unexpected argument: " + positional[0], EXIT_USAGE, "usage")
 
@@ -307,7 +346,7 @@ def _volume_command(app, args, session):
                 size_bytes = int(float(size) * 1024**3)
             except ValueError:
                 raise MachineError(
-                    f"--size must be a number of gigabytes (got '{size}').", EXIT_CONFIG, "config"
+                    f"--size must be a number of gigabytes (got '{size}').", EXIT_USAGE, "usage"
                 ) from None
         else:
             size_bytes = None
@@ -388,7 +427,7 @@ def _volume_upload(conn, options, session):
     vol_format = options.get("format", "raw")
     if vol_format not in ("raw", "qcow2"):
         raise MachineError(
-            f"--format must be raw or qcow2 (got '{vol_format}').", EXIT_CONFIG, "config"
+            f"--format must be raw or qcow2 (got '{vol_format}').", EXIT_USAGE, "usage"
         )
     if not os.path.isfile(source):
         raise MachineError(f"No such file: {source}", EXIT_CONFIG, "config")
@@ -453,6 +492,7 @@ def _domain_command(app, args, session):
     conn = _connection(app)
     subcommand = args[0] if args else None
     positional, options = _words(args[1:])
+    _reject_unknown_flags(f"domain {subcommand}", options)
 
     if subcommand == "list":
         try:
@@ -559,7 +599,8 @@ def _network_command(app, args, _session):
     """``network list``, ``network info <name>``."""
     conn = _connection(app)
     subcommand = args[0] if args else None
-    positional, _options = _words(args[1:])
+    positional, options = _words(args[1:])
+    _reject_unknown_flags(f"network {subcommand}", options)
 
     if subcommand == "list":
         try:
@@ -604,6 +645,7 @@ def _host_command(app, args, _session):
     """``host capabilities``, ``host resources``."""
     conn = _connection(app)
     subcommand = args[0] if args else None
+    _reject_unknown_flags(f"host {subcommand}", _words(args[1:])[1])
 
     if subcommand == "capabilities":
         resources = _node_information(conn)

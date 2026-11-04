@@ -575,19 +575,29 @@ credentials it carries are not repeated back.
 | Status | Meaning |
 | --- | --- |
 | 0 | The call succeeded. |
-| 2 | Unknown command, or bad arguments. |
+| 2 | Unknown command, unknown flag, or a value that cannot be parsed. |
 | 3 | A deployment file is missing, malformed or invalid. |
 | 4 | The hypervisor cannot be reached. |
 | 5 | No such domain, volume, pool or network. |
 | 6 | The name is taken. |
 | 7 | The hypervisor refused, or the operation failed. |
-| 8 | A wait timed out. |
+| 8 | A wait ran out — install media that stops downloading, for instance. |
 | 9 | The command has no machine-readable result in this version of vmc. |
+
+Status 2 covers three mistakes, and the message names the word it stumbled on
+(`machine info has no --verbose flag.`, `--size must be a number of gigabytes
+(got 'abc').`), so a caller can tell which argument to fix. A flag a command
+does not take is answered as a mistake rather than ignored: no command reports
+success for a flag it did not act on.
+
+Status 5 is the resource's own answer: a deploy naming a storage pool that is
+not there leaves 5, the same status `pool info` gives for that pool.
 
 Status 9 is how a caller tells a command that does not exist *here* from a
 command that ran and failed: a command gains a machine-readable result one at
 a time, and until then it is reported as unsupported rather than as a success
-with an empty payload. `machine info` lists the commands this vmc answers to.
+with an empty payload. A word that is not a command at all is status 2, not 9.
+`machine info` lists the commands this vmc answers to.
 
 ## Advanced Tools
 

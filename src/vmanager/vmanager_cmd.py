@@ -4259,6 +4259,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         list_storage_pools.cache_clear()
         list_networks.cache_clear()
 
+        # The pool the config names is the pool the machine lands in, so a name
+        # that is not there is the pool's own answer, not a bad file.
+        try:
+            conn.storagePoolLookupByName(cfg["storage_pool"])
+        except libvirt.libvirtError:
+            self._deploy_fail(
+                f"No storage pool '{cfg['storage_pool']}' on {server_name}.",
+                EXIT_NOT_FOUND,
+                "not_found",
+            )
+            return
+
         # A machine that boots a disk it already has is a different deployment
         # from an install, and shares nothing with one below this point.
         if cfg["disk_volume"]:
@@ -4394,7 +4406,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             pool = conn.storagePoolLookupByName(pool_name)
         except libvirt.libvirtError:
             self._deploy_fail(
-                f"No storage pool '{pool_name}' on {server_name}.", EXIT_CONFIG, "pool_unavailable"
+                f"No storage pool '{pool_name}' on {server_name}.", EXIT_NOT_FOUND, "not_found"
             )
             return
         _ensure_pool_active(pool)

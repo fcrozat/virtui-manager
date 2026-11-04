@@ -382,6 +382,39 @@ class VolumeCommandTest(unittest.TestCase):
             )
         self.assertEqual(overlay.call_args[1]["size_bytes"], 40 * 1024**3)
 
+    def test_a_size_that_is_not_a_number_is_a_usage_error(self):
+        """A bad value in the words is the caller's mistake, not a bad config file."""
+        with self.assertRaises(MachineError) as raised:
+            answer(
+                self.conn,
+                "volume create-overlay --pool default --name instance.qcow2 "
+                "--backing base.qcow2 --size abc",
+            )
+        self.assertEqual(raised.exception.status, EXIT_USAGE)
+        self.assertEqual(raised.exception.code, "usage")
+
+    def test_a_format_that_is_neither_raw_nor_qcow2_is_a_usage_error(self):
+        with self.assertRaises(MachineError) as raised:
+            answer(
+                self.conn,
+                "volume upload --pool default --name d --file /etc/hostname --format ext4",
+            )
+        self.assertEqual(raised.exception.status, EXIT_USAGE)
+        self.assertEqual(raised.exception.code, "usage")
+
+    def test_a_flag_the_command_does_not_take_is_a_usage_error(self):
+        """A flag nobody offered is answered as the mistake it is, not ignored."""
+        with self.assertRaises(MachineError) as raised:
+            answer(self.conn, "volume info --pool default --name base.qcow2 --recursive yes")
+        self.assertEqual(raised.exception.status, EXIT_USAGE)
+        self.assertIn("--recursive", str(raised.exception))
+
+    def test_a_flag_on_a_command_that_takes_none_is_a_usage_error(self):
+        with self.assertRaises(MachineError) as raised:
+            answer(self.conn, "pool info default --force yes")
+        self.assertEqual(raised.exception.status, EXIT_USAGE)
+        self.assertIn("--force", str(raised.exception))
+
     def test_a_volume_that_is_not_there_is_status_five(self):
         with self.assertRaises(MachineError) as raised:
             answer(self.conn, "volume info --pool default --name nope")

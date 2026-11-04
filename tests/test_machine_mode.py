@@ -40,6 +40,12 @@ def extra_command(name, handler):
         MACHINE_COMMANDS.pop(name, None)
 
 
+def cli_with(*names):
+    """A stand-in command loop: it answers to `do_<name>` for those commands."""
+    methods = {f"do_{name}": lambda self, _args=None: None for name in names}
+    return type("Cli", (), methods)()
+
+
 def run(line, app=None):
     """Run one command in machine mode, returning (status, parsed stream)."""
     stream = io.StringIO()
@@ -70,11 +76,19 @@ class TestMachineEnvelope(unittest.TestCase):
         self.assertEqual(objects[0]["data"], {"domain": "sidekick-1"})
 
     def test_command_without_machine_output_is_not_a_success(self):
-        status, objects = run("start sidekick-1")
+        # `start` is a command this vmc has, with no machine form: not a usage
+        # error, and not a success either.
+        status, objects = run("start sidekick-1", app=cli_with("start"))
 
         self.assertEqual(status, EXIT_UNSUPPORTED)
         self.assertEqual(objects[0]["ok"], False)
         self.assertEqual(objects[0]["code"], "unsupported")
+
+    def test_a_word_that_is_not_a_command_is_a_usage_error(self):
+        status, objects = run("bogus sidekick-1", app=cli_with("start"))
+
+        self.assertEqual(status, EXIT_USAGE)
+        self.assertEqual(objects[0]["code"], "usage")
 
     def test_empty_command_is_a_usage_error(self):
         status, objects = run("   ")
@@ -120,6 +134,12 @@ class TestMachineInfo(unittest.TestCase):
         self.assertEqual(data["protocol"], PROTOCOL_VERSION)
         self.assertEqual(data["version"], AppInfo.version)
         self.assertIn("machine", data["commands"])
+
+    def test_a_flag_it_does_not_take_is_a_usage_error(self):
+        status, objects = run("machine info --verbose yes")
+
+        self.assertEqual(status, EXIT_USAGE)
+        self.assertIn("--verbose", objects[0]["message"])
 
     def test_unknown_subcommand_is_a_usage_error(self):
         status, objects = run("machine nonsense")

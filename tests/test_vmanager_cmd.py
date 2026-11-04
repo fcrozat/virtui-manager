@@ -440,6 +440,78 @@ class TestDeployFromConfig(unittest.TestCase):
         )
         self.assertEqual(kwargs["metadata"]["instance"], "worker01")
 
+    def test_a_deploy_naming_a_pool_that_is_not_there_is_status_five(self):
+        """A pool that is not there is the pool's status, not a bad config file."""
+        import libvirt
+
+        from vmanager.machine_mode import EXIT_NOT_FOUND, MachineError, MachineSession
+
+        # The pool vmc would fall back to is there; the one the config names is not.
+        cfg_path = self._boot_cfg(storage_pool="sidekick")
+        conn = MagicMock()
+        conn.lookupByName.side_effect = self._no_domain_error()
+
+        def look_up_pool(name):
+            if name != "default":
+                raise libvirt.libvirtError("no such pool")
+            pool = MagicMock()
+            pool.isActive.return_value = True
+            return pool
+
+        conn.storagePoolLookupByName.side_effect = look_up_pool
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+
+        with (
+            patch("vmanager.vmanager_cmd.VMProvisioner"),
+            patch("sys.stdout", MagicMock()),
+        ):
+            with self.assertRaises(MachineError) as raised:
+                self.cmd.deploy_from_config(cfg_path, session=MachineSession("deploy"))
+
+        self.assertEqual(raised.exception.status, EXIT_NOT_FOUND)
+        self.assertEqual(raised.exception.code, "not_found")
+
+    def test_an_install_naming_a_pool_that_is_not_there_is_status_five(self):
+        """The pool is checked before the two deploy routes part company."""
+        import libvirt
+
+        from vmanager.machine_mode import EXIT_NOT_FOUND, MachineError, MachineSession
+
+        cfg_path = self._write_cfg(
+            {
+                "server": "local",
+                "vm_name": "web01",
+                "vm_type": "server",
+                "iso": {"source": "url", "url": "https://x/y.iso"},
+                "storage_pool": "sidekick",
+            }
+        )
+        conn = MagicMock()
+        conn.lookupByName.side_effect = self._no_domain_error()
+
+        def look_up_pool(name):
+            if name != "default":
+                raise libvirt.libvirtError("no such pool")
+            pool = MagicMock()
+            pool.isActive.return_value = True
+            return pool
+
+        conn.storagePoolLookupByName.side_effect = look_up_pool
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+
+        with (
+            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov,
+            patch("sys.stdout", MagicMock()),
+        ):
+            with self.assertRaises(MachineError) as raised:
+                self.cmd.deploy_from_config(cfg_path, session=MachineSession("deploy"))
+
+        self.assertEqual(raised.exception.status, EXIT_NOT_FOUND)
+        self.assertEqual(raised.exception.code, "not_found")
+        mock_prov.return_value.provision_vm.assert_not_called()
+
     def test_a_boot_volume_that_is_not_there_is_status_five(self):
         from vmanager.machine_mode import EXIT_NOT_FOUND, MachineError, MachineSession
 

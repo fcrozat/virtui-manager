@@ -131,6 +131,9 @@ def _machine_info(_app, args, _session):
 
     if args and args[0] != "info":
         raise MachineError(f"Unknown machine subcommand '{args[0]}'.", EXIT_USAGE, "usage")
+    for word in args[1:]:
+        if word.startswith("--"):
+            raise MachineError(f"machine info has no {word} flag.", EXIT_USAGE, "usage")
     return {
         "protocol": PROTOCOL_VERSION,
         "name": AppInfo.name,
@@ -161,11 +164,16 @@ def run_command(app, line, session):
 
     handler = MACHINE_COMMANDS.get(parts[0])
     if handler is None:
-        raise MachineError(
-            f"The command '{parts[0]}' has no machine-readable result.",
-            EXIT_UNSUPPORTED,
-            "unsupported",
-        )
+        # Two different answers: a command vmc has but has not given a
+        # machine-readable form yet is this version's gap (9), a word vmc does
+        # not know at all is the caller's mistake (2).
+        if hasattr(app, f"do_{parts[0]}"):
+            raise MachineError(
+                f"The command '{parts[0]}' has no machine-readable result.",
+                EXIT_UNSUPPORTED,
+                "unsupported",
+            )
+        raise MachineError(f"Unknown command '{parts[0]}'.", EXIT_USAGE, "usage")
 
     data = handler(app, parts[1:], session)
     return session.succeed(data)
