@@ -42,7 +42,10 @@ PROFILE_HARDWARE = {
     "low_resource": (VMType.LOW_RESOURCE, 512, 1, "0.5"),
     "wdesktop": (VMType.WDESKTOP, 16384, 8, "16"),
     "wldesktop": (VMType.WLDESKTOP, 4096, 4, "4"),
-    "server": (VMType.SERVER, 4096, 6, "4"),
+    # The screen's Server pre-fill went back up to 16 GB in 3.5.3, and the rule
+    # above is that the screen defines the profile - so a server deploy starts
+    # 16384 MB again. The screen still shows "16", as it did before #25.
+    "server": (VMType.SERVER, 16384, 6, "16"),
 }
 
 
@@ -67,6 +70,10 @@ def expert_defaults_for(vm_type, distro=None):
         "#disk-size-input": _Field(),
         "#disk-format": _Field(),
         "#boot-uefi-checkbox": _Field(),
+        # A Secure VM has no video output, so the screen also defaults its serial
+        # console checkbox on for that profile; the handler queries it for every
+        # profile and this fake has to answer for all of them.
+        "#automation-serial-console": _Field(),
     }
     modal = InstallVMModal.__new__(InstallVMModal)
     modal.query_one = lambda selector, *args, **kwargs: fields[selector]

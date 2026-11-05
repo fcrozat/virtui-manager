@@ -52,8 +52,9 @@ class AppInfo:  # pylint: disable=too-few-public-methods
 
     name = "virtui-manager"
     namecase = "VirtUI Manager"
-    version = "3.5.0"
+    version = "3.5.3"
     author = "Antoine Ginies"
+    copyright_years = "2025-2026"
 
 
 class VMCardConstants:  # pylint: disable=too-few-public-methods

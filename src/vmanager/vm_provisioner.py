@@ -120,7 +120,7 @@ VM_TYPE_DEFAULTS: Dict[VMType, Dict[str, int]] = {
     VMType.LOW_RESOURCE: {"memory_mb": 512, "vcpu": 1},
     VMType.WDESKTOP: {"memory_mb": 16384, "vcpu": 8},
     VMType.WLDESKTOP: {"memory_mb": 4096, "vcpu": 4},
-    VMType.SERVER: {"memory_mb": 4096, "vcpu": 6},
+    VMType.SERVER: {"memory_mb": 16384, "vcpu": 6},
 }
 
 
@@ -1014,7 +1014,7 @@ class VMProvisioner:
         boot_uefi: bool,
         disk_format: str | None = None,
         os_type: OSType = OSType.OPENSUSE,
-        graphics_type: str = "spice",
+        graphics_type: str = "vnc",
         is_auto_install: bool = False,
     ) -> Dict[str, Any]:
         """
@@ -1063,8 +1063,9 @@ class VMProvisioner:
             "virtio_channels": ["org.qemu.guest_agent.0"],
         }
 
-        # Add SPICE agent channel if using SPICE
-        if graphics_type == "spice":
+        # Add SPICE agent channel if using SPICE (SECURE VMs have no video,
+        # so no SPICE graphics and no SPICE agent channel)
+        if graphics_type == "spice" and vm_type != VMType.SECURE:
             settings["virtio_channels"].append("com.redhat.spice.0")
 
         # Disable SEV/TPM/Secure Boot by default for Arch Linux, Debian and Alpine
@@ -1075,7 +1076,10 @@ class VMProvisioner:
                 {
                     "disk_cache": "writethrough",
                     "disk_format": "qcow2",
-                    "video": "qxl",
+                    # No video device and no graphics: the serial console is
+                    # the only console on a Secure VM
+                    "video": None,
+                    "graphics_type": None,
                     "tpm": True if not is_arch_debian_or_alpine else False,
                     "sev": True if not is_arch_debian_or_alpine else False,
                     "secure_boot": True if not is_arch_debian_or_alpine else False,
@@ -1216,7 +1220,7 @@ class VMProvisioner:
         initrd_path: str | None = None,
         serial_console: bool = False,
         os_type: OSType = OSType.OPENSUSE,
-        graphics_type: str = "spice",
+        graphics_type: str = "vnc",
         os_version: str | None = None,
         network_name: str = "default",
         ovmf_debug: bool = False,
@@ -1533,11 +1537,16 @@ class VMProvisioner:
     </interface>
 """
 
-        # Video
-        xml += f"""
+        # Video (SECURE VMs have no video device)
+        if settings["video"]:
+            xml += f"""
     <video>
       <model type='{settings["video"]}'/>
     </video>
+"""
+        # Graphics (SECURE VMs have no graphics: serial console only)
+        if settings["graphics_type"]:
+            xml += f"""
     <graphics type='{xml_value(settings["graphics_type"])}' port='-1' autoport='yes' listen='0.0.0.0'>
       <listen type='address' address='0.0.0.0'/>
     </graphics>
@@ -2747,7 +2756,7 @@ class VMProvisioner:
         vcpu: int = 2,
         disk_size_gb: int | None = None,
         disk_format: str | None = None,
-        graphics_type: str = "spice",
+        graphics_type: str = "vnc",
         boot_uefi: bool | None = None,
         configure_before_install: bool = False,
         show_config_modal_callback: Optional[Callable[[libvirt.virDomain], None]] = None,
@@ -3029,7 +3038,10 @@ class VMProvisioner:
         autoinst_filename = None
 
         if automation_config:
-            serial_console = automation_config.get("serial_console", False)
+            serial_console = automation_config.get("serial_console")
+            if serial_console is None:
+                # Secure VMs have no video output: default to a serial console
+                serial_console = vm_type == VMType.SECURE
             try:
                 report(StaticText.PROVISIONING_GENERATING_AUTOMATION_CONFIG, 82)
 
