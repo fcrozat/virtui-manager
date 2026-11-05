@@ -1832,6 +1832,31 @@ class TestUriOption(unittest.TestCase):
             self.cmd.deploy_from_config(cfg)
         self.assertEqual(calls, ["qemu:///system"])
 
+    def test_a_file_that_names_no_server_is_a_bad_file_even_with_a_uri(self):
+        """``-u`` replaces the file's server; it does not remove the requirement.
+
+        The file is checked the same way whether or not ``-u`` was given, so the same
+        bytes are not a bad file in one call and a good one in the next. Refusing it
+        is also what happens first: nothing is connected to on the way to telling the
+        caller their file is wrong.
+        """
+        cfg = self._write_cfg(
+            {
+                "vm_name": "v",
+                "vm_type": "server",
+                "iso": {"source": "url", "url": "http://h/SLE-15-SP1.iso"},
+            }
+        )
+        self.cmd.default_uri = "qemu:///system"
+        self.cmd._connect_one = MagicMock(return_value="local")
+
+        with patch("sys.stdout", MagicMock()), redirect_stdout(io.StringIO()) as out:
+            result = self.cmd.deploy_from_config(cfg)
+
+        self.assertIsNone(result, "a refused deployment answers with nothing deployed")
+        self.cmd._connect_one.assert_not_called()
+        self.assertIn("server", out.getvalue())
+
     def test_the_answer_names_the_hypervisor_the_override_used(self):
         """A caller can see the override took effect: `server` says where it went."""
         import libvirt

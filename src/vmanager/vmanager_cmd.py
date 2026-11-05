@@ -5384,7 +5384,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     def do_deploy_vm(self, args):
         """Deploy a single VM from a deployment JSON file (see 'prepare_json').
 
-        Usage: deploy_vm <file_or_name> [--dryrun]
+        Usage: deploy_vm <file_or_name> [--dryrun|--show]
+
+        Options:
+          --dryrun   Show a summary of the deployment without provisioning.
+          --show     Show a summary of the deployment without provisioning.
 
         <file_or_name> may be a full path, or a filename looked up in the
         default deploy directory (~/.config/virtui-manager/deploy/).
@@ -5396,7 +5400,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         arg_list = [a for a in arg_list if a not in ("--dryrun", "--show")]
 
         if not arg_list:
-            print("Usage: deploy_vm <file_or_name> [--dryrun]")
+            print("Usage: deploy_vm <file_or_name> [--dryrun|--show]")
             print("Use 'list_json' to see available files.")
             return
 
@@ -5441,11 +5445,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 def _graphics_word(plan):
     """The screen a deploy gives the machine, in the one word both summaries use.
 
-    `graphics` is carried from the file verbatim, so a file that asks for no screen
-    leaves the install route holding a `None` and the route that boots a volume
-    holding the word `"none"` it was settled to. Both mean the domain gets no
-    graphics device, and a summary that printed one on a line where the other
-    printed the other would read as two different machines.
+    Both routes carry `graphics` from the file verbatim, so both hold a `None` for a
+    file that asks for no screen, and both answer it as `null`. The answer is a field
+    a program reads; this word is for the person reading a summary, and a line that
+    printed `None` on one route and `none` on the other would read as two different
+    machines.
     """
     return plan.graphics or DeploySummaryText.NO_SCREEN
 
@@ -5522,7 +5526,7 @@ def main():
             "Connect to this libvirt uri (qemu:///system, qemu+ssh://user@host/system) "
             "and to nothing else, instead of the servers marked autoconnect in the "
             "configuration; with --json, instead of the server field of the "
-            "deployment file"
+            "deployment file, which the file still has to name"
         ),
     )
     parser.add_argument(
