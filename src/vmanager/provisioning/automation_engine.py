@@ -13,7 +13,6 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from ..utils import xml_value
 from .os_provider import OSType, hash_password
 
 
@@ -89,7 +88,7 @@ class AutomationEngine:
         if not template_path:
             content = self._generate_basic_kickstart(config)
         else:
-            with open(template_path, encoding="utf-8") as f:
+            with open(template_path, "r", encoding="utf-8") as f:
                 content = self._substitute_variables(
                     f.read(), config, hash_fields=["user_password", "password", "root_password"]
                 )
@@ -116,7 +115,7 @@ class AutomationEngine:
             if not template_path:
                 raise FileNotFoundError(f"Ubuntu autoinstall template not found: {template_name}")
 
-            with open(template_path, encoding="utf-8") as f:
+            with open(template_path, "r", encoding="utf-8") as f:
                 content = self._substitute_variables(
                     f.read(), config, hash_fields=["password", "user_password", "root_password"]
                 )
@@ -147,7 +146,7 @@ class AutomationEngine:
         if not template_path:
             raise FileNotFoundError(f"Preseed template not found: {template_name}")
 
-        with open(template_path, encoding="utf-8") as f:
+        with open(template_path, "r", encoding="utf-8") as f:
             content = self._substitute_variables(
                 f.read(), config, hash_fields=["password", "user_password"]
             )
@@ -181,7 +180,7 @@ class AutomationEngine:
         if not template_path:
             raise FileNotFoundError(f"OpenSUSE template not found: {template_name}")
 
-        with open(template_path, encoding="utf-8") as f:
+        with open(template_path, "r", encoding="utf-8") as f:
             content = self._substitute_variables(
                 f.read(), config, hash_fields=["root_password", "user_password"]
             )
@@ -221,7 +220,7 @@ class AutomationEngine:
         if not template_path:
             raise FileNotFoundError(f"Arch Linux template not found: {template_name}")
 
-        with open(template_path, encoding="utf-8") as f:
+        with open(template_path, "r", encoding="utf-8") as f:
             # Archinstall usually takes plaintext in JSON and handles hashing itself,
             # but VirtUI templates might expect substitution.
             content = self._substitute_variables(f.read(), config)
@@ -232,7 +231,7 @@ class AutomationEngine:
         # Also handle user_credentials if present in templates
         creds_template = self.templates_dir / "archinstall-user-credentials.json"
         if creds_template.exists():
-            with open(creds_template, encoding="utf-8") as f:
+            with open(creds_template, "r", encoding="utf-8") as f:
                 creds_content = self._substitute_variables(f.read(), config)
             self._write_file(output_path / "user_credentials.json", creds_content)
 
@@ -240,8 +239,8 @@ class AutomationEngine:
 
     # --- Alpine Linux (Answers / apkovl) ---
     def _generate_alpine(self, version, vm_name, user_config, output_path, template_name):
-        import io
         import tarfile
+        import io
         from datetime import datetime
 
         if not template_name:
@@ -277,7 +276,7 @@ class AutomationEngine:
         if not template_path:
             raise FileNotFoundError(f"Alpine template not found: {template_name}")
 
-        with open(template_path, encoding="utf-8") as f:
+        with open(template_path, "r", encoding="utf-8") as f:
             answers_content = self._substitute_variables(f.read(), config)
 
         # Default to apkovl tarball for full automation
@@ -374,10 +373,6 @@ reboot
 
         No-op (with a warning) if the template has no ``</packages>`` anchor,
         so templates that already hardcode their package set keep working.
-
-        A package name is a name, not markup: it is escaped on the way in, so a
-        profile asking for a package written with `&` or a quote still yields one
-        package rather than a document the installer cannot read.
         """
         pkgs = [str(p).strip() for p in packages if str(p).strip()]
         if not pkgs:
@@ -388,7 +383,7 @@ reboot
                 "AutoYaST template has no <packages> section; extra packages ignored"
             )
             return content
-        block = "".join(f"            <package>{xml_value(p)}</package>\n" for p in pkgs)
+        block = "".join(f"            <package>{p}</package>\n" for p in pkgs)
         return content.replace(anchor, block + anchor, 1)
 
     def _apply_agama_packages(self, content: str, packages: List[str]) -> str:
@@ -474,12 +469,12 @@ reboot
 
         return f"""# Basic Fedora Kickstart
 text
-lang {config.get("locale", "en_US.UTF-8")}
-keyboard {config.get("keyboard", "us")}
-timezone {config.get("timezone", "UTC")} --isUtc
+lang {config.get('locale', 'en_US.UTF-8')}
+keyboard {config.get('keyboard', 'us')}
+timezone {config.get('timezone', 'UTC')} --isUtc
 rootpw --iscrypted {hashed_root_password}
-user --name={config.get("username", "user")} --password={hashed_password} --iscrypted --groups=wheel
-network --bootproto=dhcp --device={config.get("network_interface", "link")} --activate --hostname={config["vm_name"]}
+user --name={config.get('username', 'user')} --password={hashed_password} --iscrypted --groups=wheel
+network --bootproto=dhcp --device={config.get('network_interface', 'link')} --activate --hostname={config['vm_name']}
 ignoredisk --only-use=vda
 clearpart --all --initlabel
 autopart
