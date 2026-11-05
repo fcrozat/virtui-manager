@@ -8,6 +8,7 @@ secrets in command-line output, logs, and error messages. All sensitive data is
 redacted with "***" placeholders while preserving enough context for debugging.
 """
 
+import argparse
 import atexit
 import cmd
 import datetime
@@ -20,6 +21,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import libvirt
@@ -35,6 +37,7 @@ from .constants import (
     ServerPalette,
     StaticText,
 )
+from .deploy_config import DeployConfigError, MachinePlan, load_deploy_config
 from .libvirt_error_handler import register_error_handler
 from .libvirt_utils import get_host_resources, get_network_info
 from .machine_mode import (
@@ -63,6 +66,9 @@ from .pipeline import PipelineExecutor, PipelineMode
 from .provisioning.os_provider import OSType
 from .provisioning.templates.auto_template_manager import AutoYaSTTemplateManager
 from .storage_manager import (
+    _ensure_pool_active,
+    _safe_is_pool_active,
+    create_overlay_volume,
     delete_volume,
     ensure_default_pool,
     find_vms_using_volume,
@@ -70,6 +76,7 @@ from .storage_manager import (
     list_storage_pools,
     list_storage_volumes,
     list_unused_volumes,
+    volume_facts,
 )
 from .utils import (
     extract_server_name_from_uri,
@@ -3836,7 +3843,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 return
 
             if iso_source == "Distribution repository":
-                print(f"\nFetching available ISOs for {selected_version.display_name}...")
+                fetching = StaticText.PREPARE_FETCHING_ISOS_TEMPLATE
+                print(f"\n{fetching.format(version=selected_version.display_name)}")
                 iso_list = provisioner.get_iso_list(selected_version)
                 if not iso_list:
                     print("No ISOs found for this distribution/version.")
@@ -3852,7 +3860,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                     return f"{label} [Size: {size}]"
 
                 selected_iso_obj = self._select_choice(
-                    "Select ISO Image",
+                    StaticText.PREPARE_SELECT_ISO_IMAGE,
                     iso_list,
                     choices_provided=choices_provided,
                     choices_used=choices_used,
@@ -3901,7 +3909,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                     print("No ISO volumes found in active pools.")
                     return
                 selected_vol = self._select_choice(
-                    "Select ISO Volume",
+                    StaticText.PREPARE_SELECT_ISO_VOLUME,
                     vol_options,
                     choices_provided=choices_provided,
                     choices_used=choices_used,
@@ -3963,7 +3971,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 choices_used.append("default")
             else:
                 selected_network = self._select_choice(
-                    "Select Network",
+                    StaticText.PREPARE_SELECT_NETWORK,
                     active_networks,
                     choices_provided=choices_provided,
                     choices_used=choices_used,
@@ -4225,8 +4233,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         ``session`` to run under ``--machine``: failures then raise
         :class:`MachineError` and progress is reported as it happens.
         """
-        from .deploy_config import DeployConfigError, MachinePlan, load_deploy_config
-
         self.machine = session
 
         try:
@@ -4350,10 +4356,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
         if dryrun:
             self._print_deploy_summary(cfg, plan, iso_url)
-            result = _deploy_result(plan, dryrun=True)
-            if cfg["seed_volume"]:
-                result["seed"] = cfg["seed_volume"]
-            return result
+            return _deploy_result(plan, dryrun=True, seed=cfg["seed_volume"])
 
         cli_progress_callback = self._progress_reporter(MachineProgressStage.INSTALL)
 
@@ -4396,14 +4399,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 # The machine is on the hypervisor now, and started: what a caller
                 # reads next has to come from there, not from before this deploy.
                 machine_resources.machine_created(self, domain)
-                result = _deploy_result(
+                return _deploy_result(
                     plan,
                     running=bool(domain.isActive()),
                     autoinstall=served_profile,
+                    seed=cfg["seed_volume"],
                 )
-                if cfg["seed_volume"]:
-                    result["seed"] = cfg["seed_volume"]
-                return result
             self._deploy_fail(DeployText.NO_DOMAIN, EXIT_OPERATION, "provision_failed")
         except MachineError:
             # Already a failure with its own status; do not re-wrap it.
@@ -4482,7 +4483,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             volume = pool.storageVolLookupByName(name)
         except libvirt.libvirtError:
             return None, None
-        return machine_resources.volume_path_and_format(volume)
+        facts = volume_facts(volume)
+        return facts["path"], facts["format"]
 
     def _deploy_existing_volume(self, cfg, conn, provisioner, vm_name, server_name, dryrun=False):
         """Deploy the machine described by a `disk.volume` config: boot a disk, install nothing.
@@ -4493,15 +4495,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         of it first, so one config file describes a machine that starts from a
         base and writes nowhere else.
         """
-        from dataclasses import replace
-
-        from .deploy_config import MachinePlan
-        from .storage_manager import (
-            _ensure_pool_active,
-            _safe_is_pool_active,
-            create_overlay_volume,
-        )
-
         pool_name = cfg["storage_pool"]
         disk_volume = cfg["disk_volume"]
         try:
@@ -4554,7 +4547,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             else:
                 try:
                     volume = create_overlay_volume(pool, disk_volume, backing_path)
-                    disk_path, disk_format = machine_resources.volume_path_and_format(volume)
+                    facts = volume_facts(volume)
+                    disk_path, disk_format = facts["path"], facts["format"]
                 except Exception as e:
                     self._deploy_fail(
                         DeployText.OVERLAY_FAILED_TEMPLATE.format(
@@ -4643,10 +4637,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             print(_start_line(cfg))
 
             # What would be, and no more: no volume, no domain, nothing started.
-            result = _deploy_result(plan, dryrun=True)
+            result = _deploy_result(plan, dryrun=True, seed=cfg["seed_volume"])
             result["volume"] = disk_volume
-            if cfg["seed_volume"]:
-                result["seed"] = cfg["seed_volume"]
             return result
 
         cli_progress_callback = self._progress_reporter(MachineProgressStage.BOOT)
@@ -4684,10 +4676,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
         print(f"\nSuccessfully booted VM '{vm_name}'.")
         machine_resources.machine_created(self, domain)
-        result = _deploy_result(plan, dryrun=dryrun, running=bool(domain.isActive()))
+        result = _deploy_result(
+            plan, dryrun=dryrun, running=bool(domain.isActive()), seed=cfg["seed_volume"]
+        )
         result["volume"] = disk_volume
-        if cfg["seed_volume"]:
-            result["seed"] = cfg["seed_volume"]
         return result
 
     def _resolve_iso_url(self, provisioner, cfg):
@@ -4730,10 +4722,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             if not version:
                 print(f"No openSUSE/SLES version matching '{iso.get('version')}' found.")
                 return None
-            print(f"Fetching available ISOs for {version.display_name}...")
+            print(StaticText.PREPARE_FETCHING_ISOS_TEMPLATE.format(version=version.display_name))
             iso_list = provisioner.get_iso_list(version)
             if not iso_list:
-                print("No ISOs found for this version.")
+                print(StaticText.PREPARE_NO_ISOS_FOR_VERSION)
                 return None
             name = iso.get("name")
             chosen = None
@@ -5308,7 +5300,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     def do_list_json(self, args):
         """List all deployment JSON files created by 'prepare_json'.
         Usage: list_json"""
-        deploy_dir = Path.home() / ".config" / AppInfo.name / "deploy"
+        deploy_dir = _deploy_directory()
         if not deploy_dir.is_dir():
             print("No deployment JSON files found.")
             print("Create one with: prepare_json [output_path]")
@@ -5356,15 +5348,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             print("Use 'list_json' to see available files.")
             return
 
-        p = Path(arg).expanduser()
-        if not p.exists():
-            candidate = Path.home() / ".config" / AppInfo.name / "deploy" / arg
-            if candidate.exists():
-                p = candidate
-            else:
-                print(f"Error: JSON file not found: {arg}")
-                print("Use 'list_json' to see available files.")
-                return
+        p = self._deploy_file(arg)
+        if p is None:
+            return
 
         try:
             with open(p, encoding="utf-8") as f:
@@ -5405,15 +5391,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             return
 
         arg = arg_list[0]
-        p = Path(arg).expanduser()
-        if not p.exists():
-            candidate = Path.home() / ".config" / AppInfo.name / "deploy" / arg
-            if candidate.exists():
-                p = candidate
-            else:
-                print(f"Error: JSON file not found: {arg}")
-                print("Use 'list_json' to see available files.")
-                return
+        p = self._deploy_file(arg)
+        if p is None:
+            return
 
         self.deploy_from_config(str(p), dryrun=dryrun)
 
@@ -5423,7 +5403,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
     def complete_show_json(self, text, line, begidx, endidx):
         """Tab completion for show_json (filenames in the deploy directory)."""
-        deploy_dir = Path.home() / ".config" / AppInfo.name / "deploy"
+        return self._complete_deploy_files(text)
+
+    def complete_deploy_vm(self, text, line, begidx, endidx):
+        """Tab completion for deploy_vm (filenames in the deploy directory)."""
+        return self._complete_deploy_files(text)
+
+    @staticmethod
+    def _complete_deploy_files(text):
+        """The deployment files a command can be offered: the JSON files in the default
+        deploy directory, which is what `list_json` lists. `show_json` and `deploy_vm`
+        take the same argument, so they complete the same names."""
+        deploy_dir = _deploy_directory()
         if not deploy_dir.is_dir():
             return []
         names = [p.name for p in deploy_dir.glob("*.json")]
@@ -5431,15 +5422,31 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             return sorted(names)
         return [n for n in sorted(names) if n.startswith(text)]
 
-    def complete_deploy_vm(self, text, line, begidx, endidx):
-        """Tab completion for deploy_vm (filenames in the deploy directory)."""
-        deploy_dir = Path.home() / ".config" / AppInfo.name / "deploy"
-        if not deploy_dir.is_dir():
-            return []
-        names = [p.name for p in deploy_dir.glob("*.json")]
-        if not text:
-            return sorted(names)
-        return [n for n in sorted(names) if n.startswith(text)]
+    @staticmethod
+    def _deploy_file(arg):
+        """The deployment file a command was given, resolved the one way both commands
+        that take one resolve it: a full path, or a name in the default deploy
+        directory.
+
+        The two lines a person reads when it is neither are printed here for the same
+        reason: the same mistake in either command is the same mistake, and the words
+        that correct it belong to the shape, not to the command. Returns None once they
+        are printed, so a caller only has to stop.
+        """
+        path = Path(arg).expanduser()
+        if not path.exists():
+            path = _deploy_directory() / arg
+        if not path.exists():
+            print(f"Error: JSON file not found: {arg}")
+            print("Use 'list_json' to see available files.")
+            return None
+        return path
+
+
+def _deploy_directory():
+    """Where a deployment file is kept: the directory `prepare_json` writes to, `list_json`
+    lists, and the two commands that take a deployment file look a bare name up in."""
+    return Path.home() / ".config" / AppInfo.name / "deploy"
 
 
 def _graphics_word(plan):
@@ -5468,11 +5475,17 @@ def _start_line(cfg):
     )
 
 
-def _deploy_result(plan, dryrun=False, running=False, autoinstall=None):
+def _deploy_result(plan, dryrun=False, running=False, autoinstall=None, seed=None):
     """What a deployment made, as the ``data`` of a ``--machine`` answer.
 
     The machine is `plan`, so an answer cannot disagree with what was asked for:
     the same values a route deployed are the ones it reports.
+
+    `seed` is the volume a file named for the machine to read its own configuration
+    from, and it is put here rather than by each route because a seed belongs to the
+    machine, not to the way the machine was made. It is absent rather than empty when
+    the file named none: "no seed" is a fact a caller can tell apart from a name it
+    failed to read.
     """
     result = {
         "domain": plan.vm_name,
@@ -5494,13 +5507,13 @@ def _deploy_result(plan, dryrun=False, running=False, autoinstall=None):
         # fetch it from. Omitted rather than empty: no profile is a fact, and
         # an empty object would read as a profile with nothing in it.
         result["autoinstall"] = autoinstall
+    if seed:
+        result["seed"] = seed
     return result
 
 
 def main():
     """Entry point for Virtui Manager command-line interface."""
-    import argparse
-
     # Route libvirt errors to the logging framework instead of raw stderr
     # (same as TUI). Expected probe failures (e.g. "volume not found" during
     # upload_file) otherwise leak as C-level stderr noise.

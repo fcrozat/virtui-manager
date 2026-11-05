@@ -903,10 +903,12 @@ Specify the NUMA nodes to use.
     IN_PROGRESS_TITLE = _("In Progress")
     QUICK_INFO_TITLE = _("Quick Info")
 
-    # vmanager_cmd.py: what `prepare_json` asks with, and what it says once the answer
-    # is written. Translated, because these are put to a person at a terminal: no machine
-    # command reaches them (`--machine` has no prepare route and never writes a file), so
-    # none of them is a contract field. See docs/adr/0001.
+    # vmanager_cmd.py: what the interactive install path asks a person with — `prepare_json`
+    # writing a file, and `installvm` provisioning a machine — and what it says once the
+    # answer is written. Where the two ask the same question, they ask it with these words,
+    # so they cannot drift apart. Translated, because these are put to a person at a
+    # terminal: no machine command reaches them (`--machine` has no prepare route and never
+    # writes a file), so none of them is a contract field. See docs/adr/0001.
     PREPARE_NOT_CONNECTED = _("Not connected to any server. Use 'connect <server_name>' first.")
     PREPARE_SELECT_SERVER = _("Select Server")
     PREPARE_ENTER_VM_NAME = _("Enter VM name: ")
