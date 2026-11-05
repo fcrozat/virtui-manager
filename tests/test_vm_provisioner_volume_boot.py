@@ -14,6 +14,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
+from vmanager.constants import StaticText
 from vmanager.vm_provisioner import METADATA_NS, VMProvisioner, VMType
 
 
@@ -236,7 +237,7 @@ class VolumeBootXmlTest(unittest.TestCase):
         """
         events = []
         self.boot(progress_callback=lambda *args: events.append(args))
-        self.assertIn(("Defining the machine", 40), events)
+        self.assertIn((StaticText.PROVISIONING_DEFINING_VM, 40), events)
         for message, percent in events:
             self.assertIsInstance(message, str)
             self.assertIsInstance(percent, int)

@@ -18,7 +18,7 @@ from unittest.mock import MagicMock, patch
 # Add the src directory to the path to import vmanager modules
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
-from vmanager.constants import AppInfo, DeploySummaryText
+from vmanager.constants import AppInfo, DeploySummaryText, StaticText
 from vmanager.deploy_config import load_deploy_config
 from vmanager.machine_mode import EXIT_OK
 from vmanager.vmanager_cmd import VManagerCMD
@@ -1005,7 +1005,7 @@ class TestDeployFromConfig(unittest.TestCase):
         )
 
         def provision(**kwargs):
-            kwargs["progress_callback"]("Defining the machine", 40)
+            kwargs["progress_callback"](StaticText.PROVISIONING_DEFINING_VM, 40)
             domain = MagicMock()
             domain.isActive.return_value = True
             return domain
@@ -1025,7 +1025,7 @@ class TestDeployFromConfig(unittest.TestCase):
             {
                 "event": "progress",
                 "stage": "boot",
-                "message": "Defining the machine",
+                "message": StaticText.PROVISIONING_DEFINING_VM,
                 "percent": 40,
             },
         )
