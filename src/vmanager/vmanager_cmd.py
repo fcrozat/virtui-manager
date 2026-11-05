@@ -4386,6 +4386,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 elif cfg.get("start", True):
                     start_vm(domain)
                     print(f"VM '{vm_name}' started.")
+                # The machine is on the hypervisor now, and started: what a caller
+                # reads next has to come from there, not from before this deploy.
+                machine_resources.machine_created(self, domain)
                 result = _deploy_result(
                     plan,
                     running=bool(domain.isActive()),
@@ -4622,6 +4625,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             return
 
         print(f"\nSuccessfully booted VM '{vm_name}'.")
+        machine_resources.machine_created(self, domain)
         result = _deploy_result(plan, dryrun=dryrun, running=bool(domain.isActive()))
         result["volume"] = disk_volume
         if cfg["seed_volume"]:
