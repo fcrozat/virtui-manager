@@ -119,7 +119,7 @@ class MachinePlan:
     vm_type: VMType
 
     @classmethod
-    def of(cls, cfg, *, server_name, vm_name=None, automation_config=None) -> "MachinePlan":
+    def of(cls, cfg, *, server_name, vm_name=None, automation_config=None) -> MachinePlan:
         """The plan a validated config asks for, resources resolved.
 
         `vm_name` is given when the caller settled on a name the file does not

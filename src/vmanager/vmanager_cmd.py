@@ -231,14 +231,14 @@ class VManagerCMD(cmd.Cmd):
         # Categories for help and completion
         self.categories = {
             "Connection": [
-            "connect",
-            "disconnect",
-            "list_servers",
-            "list_connected_servers",
-            "host_info",
-            "host_capabilities",
-            "virsh",
-        ],
+                "connect",
+                "disconnect",
+                "list_servers",
+                "list_connected_servers",
+                "host_info",
+                "host_capabilities",
+                "virsh",
+            ],
             "VM Selection": [
                 "list_vms",
                 "select_vm",
@@ -286,7 +286,13 @@ class VManagerCMD(cmd.Cmd):
                 "volume_usage",
                 "delete_volume",
             ],
-            "Installation": ["prepare_json", "list_json", "show_json", "list_isos", "list_cached_isos"],
+            "Installation": [
+                "prepare_json",
+                "list_json",
+                "show_json",
+                "list_isos",
+                "list_cached_isos",
+            ],
             "Pipelines": ["pipeline"],
             "Shell/Utils": ["bash", "history", "version", "about", "quit"],
         }
@@ -4156,9 +4162,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 print(f"Error: unknown VM type '{selected_vm_type}'.")
                 return
             if selected_vm_type == VMType.SECURE and not secure_capable:
-                print(
-                    "Error: Secure VMs require a host with AMD SEV or Intel TDX support."
-                )
+                print("Error: Secure VMs require a host with AMD SEV or Intel TDX support.")
                 return
 
             # 3. Select Distribution

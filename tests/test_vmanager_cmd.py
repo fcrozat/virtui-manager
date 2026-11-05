@@ -285,19 +285,22 @@ class TestVManagerCMD(unittest.TestCase):
         conn = MagicMock()
         self.cmd.active_connections["local"] = conn
         pool_mock = MagicMock()
-        with patch(
-            "vmanager.vmanager_cmd.list_storage_pools",
-            return_value=[{"name": "default", "pool": pool_mock}],
-        ), patch(
-            "vmanager.vmanager_cmd.list_storage_volumes",
-            return_value=[
-                {
-                    "name": "vol1.qcow2",
-                    "type": "file",
-                    "capacity": 10 * 1024**3,
-                    "allocation": 5 * 1024**3,
-                }
-            ],
+        with (
+            patch(
+                "vmanager.vmanager_cmd.list_storage_pools",
+                return_value=[{"name": "default", "pool": pool_mock}],
+            ),
+            patch(
+                "vmanager.vmanager_cmd.list_storage_volumes",
+                return_value=[
+                    {
+                        "name": "vol1.qcow2",
+                        "type": "file",
+                        "capacity": 10 * 1024**3,
+                        "allocation": 5 * 1024**3,
+                    }
+                ],
+            ),
         ):
             with redirect_stdout(io.StringIO()) as buf:
                 self.cmd.do_list_volumes("")
@@ -315,8 +318,9 @@ class TestVManagerCMD(unittest.TestCase):
         vol.name.return_value = "vol1.qcow2"
         user_vm = MagicMock()
         user_vm.name.return_value = "vm1"
-        with patch("vmanager.vmanager_cmd.find_volume", return_value=vol), patch(
-            "vmanager.vmanager_cmd.find_vms_using_volume", return_value=[user_vm]
+        with (
+            patch("vmanager.vmanager_cmd.find_volume", return_value=vol),
+            patch("vmanager.vmanager_cmd.find_vms_using_volume", return_value=[user_vm]),
         ):
             with redirect_stdout(io.StringIO()) as buf:
                 self.cmd.do_volume_usage("default vol1.qcow2")
@@ -350,16 +354,18 @@ class TestVManagerCMD(unittest.TestCase):
         """Test host_capabilities displays arch, CPU models and machine types."""
         conn = MagicMock()
         self.cmd.active_connections["local"] = conn
-        with patch("vmanager.vmanager_cmd.get_host_architecture", return_value="x86_64"), patch(
-            "vmanager.vmanager_cmd.get_cpu_models", return_value=["Haswell", "IvyBridge"]
-        ), patch(
-            "vmanager.vmanager_cmd.get_latest_machine_types",
-            return_value={"pc-i440fx": "pc.i440fx.8.1", "pc-q35": "pc.q35.8.1"},
-        ), patch(
-            "vmanager.vmanager_cmd.get_host_domain_capabilities", return_value=None
-        ), patch(
-            "vmanager.vmanager_cmd.get_video_domain_capabilities",
-            return_value={"video_models": ["virtio"]},
+        with (
+            patch("vmanager.vmanager_cmd.get_host_architecture", return_value="x86_64"),
+            patch("vmanager.vmanager_cmd.get_cpu_models", return_value=["Haswell", "IvyBridge"]),
+            patch(
+                "vmanager.vmanager_cmd.get_latest_machine_types",
+                return_value={"pc-i440fx": "pc.i440fx.8.1", "pc-q35": "pc.q35.8.1"},
+            ),
+            patch("vmanager.vmanager_cmd.get_host_domain_capabilities", return_value=None),
+            patch(
+                "vmanager.vmanager_cmd.get_video_domain_capabilities",
+                return_value={"video_models": ["virtio"]},
+            ),
         ):
             with redirect_stdout(io.StringIO()) as buf:
                 self.cmd.do_host_capabilities("")
