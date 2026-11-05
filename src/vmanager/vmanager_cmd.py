@@ -27,7 +27,7 @@ import libvirt
 from . import machine_resources  # noqa: F401  registers the pool/volume/domain/host commands
 from .backup_manager import BackupManager, BackupOptions, BackupType
 from .config import get_log_path, load_config
-from .constants import AppInfo, ServerPalette
+from .constants import AppInfo, MachineProgressStage, ServerPalette
 from .libvirt_error_handler import register_error_handler
 from .libvirt_utils import get_host_resources, get_network_info
 from .machine_mode import (
@@ -39,8 +39,6 @@ from .machine_mode import (
     EXIT_OPERATION,
     EXIT_TIMEOUT,
     EXIT_USAGE,
-    STAGE_BOOT,
-    STAGE_INSTALL,
     TIMEOUT_ERRORS,
     MachineError,
     MachineSession,
@@ -4146,7 +4144,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             return
 
         # 8. Provisioning
-        cli_progress_callback = self._progress_reporter(STAGE_INSTALL)
+        cli_progress_callback = self._progress_reporter(MachineProgressStage.INSTALL)
 
         print(f"\nProvisioning VM '{vm_name}' on server '{target_server}'...")
         try:
@@ -4334,7 +4332,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 result["seed"] = cfg["seed_volume"]
             return result
 
-        cli_progress_callback = self._progress_reporter(STAGE_INSTALL)
+        cli_progress_callback = self._progress_reporter(MachineProgressStage.INSTALL)
 
         print(f"\nProvisioning VM '{vm_name}' on server '{server_name}'...")
         # Filled in by the provisioner while it serves the auto-install profile;
@@ -4545,7 +4543,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 result["seed"] = cfg["seed_volume"]
             return result
 
-        cli_progress_callback = self._progress_reporter(STAGE_BOOT)
+        cli_progress_callback = self._progress_reporter(MachineProgressStage.BOOT)
 
         try:
             domain = provisioner.provision_existing_volume(

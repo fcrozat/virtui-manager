@@ -40,11 +40,10 @@ EXIT_UNSUPPORTED = 9  # command has no machine-readable result (older vmc)
 # otherwise a stalled transfer is mistaken for a generic failure there.
 TIMEOUT_ERRORS = (TimeoutError, socket.timeout)
 
-# The stage a progress event names, so a caller can group events without
-# reading prose. The ``message`` carries the detail; the stage says which part
-# of a long command is talking. Documented in documentation/manual/cli.md.
-STAGE_INSTALL = "install"  # deploying a machine from install media
-STAGE_BOOT = "boot"  # deploying a machine from a volume the pool holds
+# The stage a progress event names is one of ``MachineProgressStage``, held with
+# the rest of the words a machine caller is answered with, and listed by
+# documentation/manual/cli.md. A command takes the stage it reports from there, so
+# the set cannot grow quietly behind the manual.
 
 
 class MachineError(Exception):
@@ -90,7 +89,12 @@ class MachineSession:
         self._stream.flush()
 
     def progress(self, stage, message, percent=None):
-        """Report what a long command is doing, while it does it."""
+        """Report what a long command is doing, while it does it.
+
+        ``stage`` says which part of the command is talking — one of
+        ``MachineProgressStage.ALL`` — and ``message`` is the detail for whoever is
+        reading it.
+        """
         event = {"event": "progress", "stage": stage, "message": message}
         if percent is not None:
             event["percent"] = percent
