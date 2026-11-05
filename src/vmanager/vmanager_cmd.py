@@ -27,7 +27,7 @@ import libvirt
 from . import machine_resources  # noqa: F401  registers the pool/volume/domain/host commands
 from .backup_manager import BackupManager, BackupOptions, BackupType
 from .config import get_log_path, load_config
-from .constants import AppInfo, MachineProgressStage, ServerPalette
+from .constants import AppInfo, DeployText, MachineProgressStage, ServerPalette
 from .libvirt_error_handler import register_error_handler
 from .libvirt_utils import get_host_resources, get_network_info
 from .machine_mode import (
@@ -4225,17 +4225,21 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         try:
             cfg = load_deploy_config(path)
         except DeployConfigError as e:
-            self._deploy_fail(f"Config error: {e}", EXIT_CONFIG, "config_invalid")
+            self._deploy_fail(
+                DeployText.CONFIG_ERROR_TEMPLATE.format(error=e), EXIT_CONFIG, "config_invalid"
+            )
             return
 
         vm_name = cfg["vm_name"]
         try:
             vm_name, _was_modified = _sanitize_domain_name(vm_name)
         except ValueError as e:
-            self._deploy_fail(f"Invalid VM name: {e}", EXIT_CONFIG, "config_invalid")
+            self._deploy_fail(
+                DeployText.INVALID_VM_NAME_TEMPLATE.format(error=e), EXIT_CONFIG, "config_invalid"
+            )
             return
         if not vm_name:
-            self._deploy_fail("VM name cannot be empty.", EXIT_CONFIG, "config_invalid")
+            self._deploy_fail(DeployText.VM_NAME_EMPTY, EXIT_CONFIG, "config_invalid")
             return
 
         # A caller that named its hypervisor with -u/--uri means that one, even
@@ -4244,7 +4248,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         server_name = self._connect_one(server)
         if not server_name:
             self._deploy_fail(
-                f"Could not connect to server '{server}'.", EXIT_CONNECTION, "connection_failed"
+                DeployText.CANNOT_CONNECT_TEMPLATE.format(server=server),
+                EXIT_CONNECTION,
+                "connection_failed",
             )
             return
         conn = self.active_connections[server_name]
@@ -4253,12 +4259,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         # Fail fast before creating any artifacts
         try:
             conn.lookupByName(vm_name)
-            self._deploy_fail(f"VM '{vm_name}' already exists.", EXIT_EXISTS, "already_exists")
+            self._deploy_fail(
+                DeployText.VM_ALREADY_EXISTS_TEMPLATE.format(name=vm_name),
+                EXIT_EXISTS,
+                "already_exists",
+            )
             return
         except libvirt.libvirtError as e:
             if e.get_error_code() != libvirt.VIR_ERR_NO_DOMAIN:
                 self._deploy_fail(
-                    f"Error checking VM name: {e}", EXIT_OPERATION, "operation_failed"
+                    DeployText.VM_NAME_CHECK_FAILED_TEMPLATE.format(error=e),
+                    EXIT_OPERATION,
+                    "operation_failed",
                 )
                 return
 
@@ -4268,7 +4280,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         if not dryrun:
             if not ensure_default_pool(conn):
                 self._deploy_fail(
-                    "No storage pool available and could not create default pool.",
+                    DeployText.NO_DEFAULT_POOL,
                     EXIT_OPERATION,
                     "pool_unavailable",
                 )
@@ -4283,7 +4295,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             pool = conn.storagePoolLookupByName(cfg["storage_pool"])
         except libvirt.libvirtError:
             self._deploy_fail(
-                f"No storage pool '{cfg['storage_pool']}' on {server_name}.",
+                DeployText.NO_SUCH_POOL_TEMPLATE.format(
+                    pool=cfg["storage_pool"], server=server_name
+                ),
                 EXIT_NOT_FOUND,
                 "not_found",
             )
@@ -4298,7 +4312,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
         iso_url = self._resolve_iso_url(provisioner, cfg)
         if not iso_url:
-            self._deploy_fail("Could not resolve ISO from config.", EXIT_CONFIG, "iso_unresolvable")
+            self._deploy_fail(DeployText.ISO_UNRESOLVABLE, EXIT_CONFIG, "iso_unresolvable")
             return
 
         # A seed is a disc the guest reads its own configuration from, and it
@@ -4311,7 +4325,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             seed_path, _ = self._volume_path(pool, cfg["seed_volume"])
             if seed_path is None:
                 self._deploy_fail(
-                    f"No seed volume '{cfg['seed_volume']}' in '{cfg['storage_pool']}'.",
+                    DeployText.NO_SUCH_SEED_TEMPLATE.format(
+                        seed=cfg["seed_volume"], pool=cfg["storage_pool"]
+                    ),
                     EXIT_NOT_FOUND,
                     "not_found",
                 )
@@ -4378,9 +4394,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 if cfg["seed_volume"]:
                     result["seed"] = cfg["seed_volume"]
                 return result
-            self._deploy_fail(
-                "Provisioning did not return a domain.", EXIT_OPERATION, "provision_failed"
-            )
+            self._deploy_fail(DeployText.NO_DOMAIN, EXIT_OPERATION, "provision_failed")
         except MachineError:
             # Already a failure with its own status; do not re-wrap it.
             raise
@@ -4389,7 +4403,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             # wait that ran out keeps the status the caller switches on.
             self._deploy_fail(str(e), EXIT_TIMEOUT, "timeout")
         except Exception as e:
-            self._deploy_fail(f"Failed to provision VM: {e}", EXIT_OPERATION, "provision_failed")
+            self._deploy_fail(
+                DeployText.PROVISION_FAILED_TEMPLATE.format(error=e),
+                EXIT_OPERATION,
+                "provision_failed",
+            )
 
     def _print_deploy_summary(self, cfg, plan, iso_url):
         """Print a dry-run summary of what ``deploy_from_config`` would do.
@@ -4459,7 +4477,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             pool = conn.storagePoolLookupByName(pool_name)
         except libvirt.libvirtError:
             self._deploy_fail(
-                f"No storage pool '{pool_name}' on {server_name}.", EXIT_NOT_FOUND, "not_found"
+                DeployText.NO_SUCH_POOL_TEMPLATE.format(pool=pool_name, server=server_name),
+                EXIT_NOT_FOUND,
+                "not_found",
             )
             return
         # The pool a dry run would have to bring up but may not touch: while it
@@ -4488,7 +4508,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             backing_path, _ = volume_path(cfg["backing_volume"])
             if backing_path is None:
                 self._deploy_fail(
-                    f"No backing volume '{cfg['backing_volume']}' in '{pool_name}'.",
+                    DeployText.NO_SUCH_BACKING_TEMPLATE.format(
+                        backing=cfg["backing_volume"], pool=pool_name
+                    ),
                     EXIT_NOT_FOUND,
                     "not_found",
                 )
@@ -4504,14 +4526,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                     disk_path, disk_format = machine_resources.volume_path_and_format(volume)
                 except Exception as e:
                     self._deploy_fail(
-                        f"Could not make '{disk_volume}' over '{cfg['backing_volume']}': {e}",
+                        DeployText.OVERLAY_FAILED_TEMPLATE.format(
+                            volume=disk_volume, backing=cfg["backing_volume"], error=e
+                        ),
                         EXIT_OPERATION,
                         "operation_failed",
                     )
                     return
         if not would_start_pool and disk_path is None and not would_create:
             self._deploy_fail(
-                f"No volume '{disk_volume}' in the pool '{pool_name}'.",
+                DeployText.NO_SUCH_VOLUME_TEMPLATE.format(volume=disk_volume, pool=pool_name),
                 EXIT_NOT_FOUND,
                 "not_found",
             )
@@ -4522,7 +4546,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             seed_path, _ = volume_path(cfg["seed_volume"])
             if not would_start_pool and seed_path is None:
                 self._deploy_fail(
-                    f"No seed volume '{cfg['seed_volume']}' in '{pool_name}'.",
+                    DeployText.NO_SUCH_SEED_TEMPLATE.format(
+                        seed=cfg["seed_volume"], pool=pool_name
+                    ),
                     EXIT_NOT_FOUND,
                     "not_found",
                 )
@@ -4585,14 +4611,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             raise
         except Exception as e:
             self._deploy_fail(
-                f"Failed to boot the machine: {e}", EXIT_OPERATION, "provision_failed"
+                DeployText.BOOT_FAILED_TEMPLATE.format(error=e),
+                EXIT_OPERATION,
+                "provision_failed",
             )
             return
 
         if not domain:
-            self._deploy_fail(
-                "Provisioning did not return a domain.", EXIT_OPERATION, "provision_failed"
-            )
+            self._deploy_fail(DeployText.NO_DOMAIN, EXIT_OPERATION, "provision_failed")
             return
 
         print(f"\nSuccessfully booted VM '{vm_name}'.")

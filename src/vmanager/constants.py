@@ -1487,6 +1487,50 @@ class MachineResourceText:  # pylint: disable=too-few-public-methods
     )
 
 
+class DeployText:  # pylint: disable=too-few-public-methods
+    """What the config-driven deploy answers with when it cannot deploy.
+
+    One string, two readers. ``deploy_from_config`` prints these sentences and,
+    under ``--machine``, ships the same sentence as the ``message`` of the failure
+    answer — so they are the awkward middle: they read like prose because they are
+    read by a person, and they are a contract because a program logs the same words
+    beside the ``code`` it branches on. The machine half picks the class, and with
+    it the rule that they are not passed through `_()`, for the reason given on
+    `MachineModeText`: a translated answer would say something different while the
+    exit status went on saying the same thing.
+
+    Names come out of the deploy file, so they arrive as placeholders and the
+    sentence stays here. `checks/check_constants.py` reports any deploy failure
+    that spells its answer out instead of naming one of these.
+    """
+
+    # The file itself: unreadable, or readable and wrong.
+    CONFIG_ERROR_TEMPLATE = "Config error: {error}"
+    INVALID_VM_NAME_TEMPLATE = "Invalid VM name: {error}"
+    VM_NAME_EMPTY = "VM name cannot be empty."
+
+    # Where the machine was meant to land.
+    CANNOT_CONNECT_TEMPLATE = "Could not connect to server '{server}'."
+    VM_ALREADY_EXISTS_TEMPLATE = "VM '{name}' already exists."
+    VM_NAME_CHECK_FAILED_TEMPLATE = "Error checking VM name: {error}"
+    NO_DEFAULT_POOL = "No storage pool available and could not create default pool."
+
+    # A thing the file names that the hypervisor does not have. Both routes answer
+    # these from here: an install looks them up in the pool it resolved, a boot in
+    # the pool named by `storage_pool`, which is the same pool either way.
+    NO_SUCH_POOL_TEMPLATE = "No storage pool '{pool}' on {server}."
+    NO_SUCH_VOLUME_TEMPLATE = "No volume '{volume}' in the pool '{pool}'."
+    NO_SUCH_SEED_TEMPLATE = "No seed volume '{seed}' in '{pool}'."
+    NO_SUCH_BACKING_TEMPLATE = "No backing volume '{backing}' in '{pool}'."
+    OVERLAY_FAILED_TEMPLATE = "Could not make '{volume}' over '{backing}': {error}"
+
+    # The deploy itself, once everything the file named has been found.
+    ISO_UNRESOLVABLE = "Could not resolve ISO from config."
+    NO_DOMAIN = "Provisioning did not return a domain."
+    PROVISION_FAILED_TEMPLATE = "Failed to provision VM: {error}"
+    BOOT_FAILED_TEMPLATE = "Failed to boot the machine: {error}"
+
+
 class ProgressMessages:  # pylint: disable=too-few-public-methods
     """Constants for progress and in-progress status messages"""
 
