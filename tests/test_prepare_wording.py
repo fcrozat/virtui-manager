@@ -202,7 +202,6 @@ class TestTheWordingAPersonSees(unittest.TestCase):
         "PREPARE_POSITIVE_NUMBER": ({}, "Must be a positive number."),
         # The ISO choice. The four sources are also what `_prepare_iso` branches on.
         "PREPARE_ISO_SOURCE_REPOSITORY": ({}, "Distribution repository"),
-        "PREPARE_ISO_SOURCE_CACHED": ({}, "Cached ISOs"),
         "PREPARE_ISO_SOURCE_POOL": ({}, "Pool volumes"),
         "PREPARE_ISO_SOURCE_CUSTOM": ({}, "Custom URL/Path"),
         "PREPARE_SELECT_ISO_SOURCE": ({}, "Select ISO Source"),
@@ -248,22 +247,24 @@ class TestTheWordingAPersonSees(unittest.TestCase):
                 value = getattr(StaticText, name)
                 self.assertEqual(value.format(**values) if values else value, expected)
 
-    def test_the_storage_pool_question_reuses_the_one_constant(self):
-        """`Select Storage Pool` was already a constant; the prepare path uses it.
+    def test_two_questions_reuse_the_constants_that_already_existed(self):
+        """`Select Storage Pool` and `Cached ISOs` were constants before this ticket.
 
         A second constant holding the same sentence would be a sentence with two
-        owners, which is the thing #31 exists to remove.
+        owners, which is the thing #31 exists to remove. `CACHED_ISOS` is also one of
+        the four sources `_prepare_iso` branches on, so the comparison names it too.
         """
         self.assertEqual(StaticText.STORAGE_POOL_PROMPT, "Select Storage Pool")
+        self.assertEqual(StaticText.CACHED_ISOS, "Cached ISOs")
         used = {
             node.attr
             for node in ast.walk(ast.parse(VMANAGER_CMD.read_text(encoding="utf-8")))
             if isinstance(node, ast.Attribute)
             and isinstance(node.value, ast.Name)
             and node.value.id == "StaticText"
-            and node.attr == "STORAGE_POOL_PROMPT"
+            and node.attr in {"STORAGE_POOL_PROMPT", "CACHED_ISOS"}
         }
-        self.assertEqual(used, {"STORAGE_POOL_PROMPT"})
+        self.assertEqual(used, {"STORAGE_POOL_PROMPT", "CACHED_ISOS"})
 
     def test_the_wording_is_marked_for_translation(self):
         """These are asked of a person, so they go through `_()` — ADR 0001.

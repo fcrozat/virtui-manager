@@ -33,6 +33,7 @@ from .constants import (
     DeployText,
     MachineProgressStage,
     ServerPalette,
+    StaticText,
 )
 from .libvirt_error_handler import register_error_handler
 from .libvirt_utils import get_host_resources, get_network_info
@@ -4803,12 +4804,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             return
 
         if not self.active_connections:
-            print("Not connected to any server. Use 'connect <server_name>' first.")
+            print(StaticText.PREPARE_NOT_CONNECTED)
             return
 
         # 1. Server
         target_server = self._select_choice(
-            "Select Server", list(self.active_connections.keys()), auto_select=True
+            StaticText.PREPARE_SELECT_SERVER,
+            list(self.active_connections.keys()),
+            auto_select=True,
         )
         if not target_server:
             return
@@ -4816,9 +4819,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         provisioner = VMProvisioner(conn)
 
         # 2. VM name
-        vm_name = self._get_input("Enter VM name: ")
+        vm_name = self._get_input(StaticText.PREPARE_ENTER_VM_NAME)
         if not vm_name:
-            print("VM name is required.")
+            print(StaticText.PREPARE_VM_NAME_REQUIRED)
             return
         try:
             vm_name, _was_modified = _sanitize_domain_name(vm_name)
@@ -4828,7 +4831,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
         # 3. VM type (a profile, or "custom" to set memory/disk/vCPU manually)
         vm_type = self._select_choice(
-            "Select VM Type",
+            StaticText.PREPARE_SELECT_VM_TYPE,
             list(VMType) + ["custom"],
             display_func=lambda t: "Custom" if t == "custom" else t.value,
             value_func=lambda t: "custom" if t == "custom" else t.name.lower(),
@@ -4840,9 +4843,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         # 4. Hardware: taken from the chosen profile, or asked when "custom".
         hardware = {}
         if vm_type == "custom":
-            memory_gb = self._get_positive_float("Memory (GB)", 4)
-            vcpu = self._get_positive_int("vCPU", 2)
-            disk_size_gb = self._get_positive_int("Disk size (GB)", 30)
+            memory_gb = self._get_positive_float(StaticText.PREPARE_MEMORY_GB, 4)
+            vcpu = self._get_positive_int(StaticText.PREPARE_VCPU, 2)
+            disk_size_gb = self._get_positive_int(StaticText.PREPARE_DISK_SIZE_GB, 30)
             hardware = {
                 "memory_mb": int(memory_gb * 1024),
                 "vcpu": vcpu,
@@ -4852,7 +4855,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         # 5. ISO
         iso = self._prepare_iso(provisioner)
         if not iso:
-            print("Could not select an ISO.")
+            print(StaticText.PREPARE_NO_ISO)
             return
 
         # 6. Network
@@ -4861,7 +4864,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         if active_networks:
             network = (
                 self._select_choice(
-                    "Select Network",
+                    StaticText.PREPARE_SELECT_NETWORK,
                     active_networks,
                     display_func=lambda n: f"{n['name']} (Mode: {n['mode']})",
                     value_func=lambda n: n["name"],
@@ -4876,7 +4879,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         if pools:
             storage_pool = (
                 self._select_choice(
-                    "Select Storage Pool",
+                    StaticText.STORAGE_POOL_PROMPT,
                     pools,
                     display_func=lambda p: p["name"],
                     value_func=lambda p: p["name"],
@@ -4886,12 +4889,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             )
 
         # 8. Boot mode
-        boot_mode = self._select_choice("Select Boot Mode", ["UEFI", "BIOS"], auto_select=False)
+        boot_mode = self._select_choice(
+            StaticText.PREPARE_SELECT_BOOT_MODE, ["UEFI", "BIOS"], auto_select=False
+        )
         boot_uefi = (boot_mode or "UEFI") == "UEFI"
 
         # 9. Graphics
         graphics = self._select_choice(
-            "Select Graphics", ["Spice", "VNC"], value_func=lambda g: g.lower(), auto_select=False
+            StaticText.PREPARE_SELECT_GRAPHICS,
+            ["Spice", "VNC"],
+            value_func=lambda g: g.lower(),
+            auto_select=False,
         )
         graphics = graphics or "spice"
 
@@ -4903,7 +4911,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
         # 11. Start after install
         start = (
-            self._select_choice("Start VM after installation?", ["yes", "no"], auto_select=False)
+            self._select_choice(
+                StaticText.PREPARE_START_AFTER_INSTALL, ["yes", "no"], auto_select=False
+            )
             or "yes"
         ) == "yes"
 
@@ -4943,10 +4953,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             try:
                 iv = int(val)
             except ValueError:
-                print("Please enter a number.")
+                print(StaticText.PREPARE_ENTER_A_NUMBER)
                 continue
             if iv < 0:
-                print("Must be a non-negative integer.")
+                print(StaticText.PREPARE_NON_NEGATIVE_INTEGER)
                 continue
             return iv
 
@@ -4962,10 +4972,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             try:
                 fv = float(val)
             except ValueError:
-                print("Please enter a number.")
+                print(StaticText.PREPARE_ENTER_A_NUMBER)
                 continue
             if fv <= 0:
-                print("Must be a positive number.")
+                print(StaticText.PREPARE_POSITIVE_NUMBER)
                 continue
             return fv
 
@@ -4978,25 +4988,35 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
     def _prepare_iso(self, provisioner):
         """Interactively pick an ISO source and return the config ``iso`` block."""
-        sources = ["Distribution repository", "Cached ISOs", "Pool volumes", "Custom URL/Path"]
-        source = self._select_choice("Select ISO Source", sources, auto_select=False)
+        sources = [
+            StaticText.PREPARE_ISO_SOURCE_REPOSITORY,
+            StaticText.CACHED_ISOS,
+            StaticText.PREPARE_ISO_SOURCE_POOL,
+            StaticText.PREPARE_ISO_SOURCE_CUSTOM,
+        ]
+        source = self._select_choice(
+            StaticText.PREPARE_SELECT_ISO_SOURCE, sources, auto_select=False
+        )
         if not source:
             return None
 
-        if source == "Distribution repository":
+        if source == StaticText.PREPARE_ISO_SOURCE_REPOSITORY:
             versions = provisioner.provider_registry.get_supported_versions(OSType.OPENSUSE)
             if not versions:
-                print("No openSUSE/SLES versions found.")
+                print(StaticText.PREPARE_NO_VERSIONS)
                 return None
             version = self._select_choice(
-                "Select Version", versions, display_func=lambda v: v.display_name, auto_select=False
+                StaticText.PREPARE_SELECT_VERSION,
+                versions,
+                display_func=lambda v: v.display_name,
+                auto_select=False,
             )
             if not version:
                 return None
-            print(f"Fetching available ISOs for {version.display_name}...")
+            print(StaticText.PREPARE_FETCHING_ISOS_TEMPLATE.format(version=version.display_name))
             iso_list = provisioner.get_iso_list(version)
             if not iso_list:
-                print("No ISOs found for this version.")
+                print(StaticText.PREPARE_NO_ISOS_FOR_VERSION)
                 return None
 
             def iso_display(iso):
@@ -5006,7 +5026,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 )
 
             chosen = self._select_choice(
-                "Select ISO Image", iso_list, display_func=iso_display, auto_select=False
+                StaticText.PREPARE_SELECT_ISO_IMAGE,
+                iso_list,
+                display_func=iso_display,
+                auto_select=False,
             )
             if not chosen:
                 return None
@@ -5016,13 +5039,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 "url": chosen.get("url"),
             }
 
-        if source == "Cached ISOs":
+        if source == StaticText.CACHED_ISOS:
             cached = provisioner.get_cached_isos()
             if not cached:
-                print("No cached ISOs found.")
+                print(StaticText.PREPARE_NO_CACHED_ISOS)
                 return None
             chosen = self._select_choice(
-                "Select Cached ISO",
+                StaticText.PREPARE_SELECT_CACHED_ISO,
                 cached,
                 display_func=lambda c: f"{c['name']} ({c['date']})",
                 value_func=lambda c: c["name"],
@@ -5032,17 +5055,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 return None
             return {"source": "cached", "volume": chosen}
 
-        if source == "Pool volumes":
+        if source == StaticText.PREPARE_ISO_SOURCE_POOL:
             vol_options = []
             for p in [p for p in list_storage_pools(provisioner.conn) if p["status"] == "active"]:
                 for v in list_storage_volumes(p["pool"]):
                     if v["name"].lower().endswith(".iso"):
                         vol_options.append((p["name"], v["name"]))
             if not vol_options:
-                print("No ISO volumes found in active pools.")
+                print(StaticText.PREPARE_NO_ISO_VOLUMES)
                 return None
             selected = self._select_choice(
-                "Select ISO Volume",
+                StaticText.PREPARE_SELECT_ISO_VOLUME,
                 vol_options,
                 display_func=lambda pv: f"{pv[1]} (pool: {pv[0]})",
                 auto_select=False,
@@ -5053,7 +5076,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             return {"source": "pool", "pool": pool_name, "volume": vol_name}
 
         # Custom URL/Path
-        url = self._get_input("Enter custom ISO URL or absolute path: ")
+        url = self._get_input(StaticText.PREPARE_ENTER_CUSTOM_ISO)
         if not url:
             return None
         return {"source": "url", "url": url}
@@ -5061,7 +5084,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     def _prepare_autoinstall(self, provisioner, vm_name):
         """Interactively build the config ``autoinstall`` block (openSUSE/SLES)."""
         use_auto = self._select_choice(
-            "Use automated installation?", ["yes", "no"], auto_select=False
+            StaticText.PREPARE_USE_AUTOINSTALL, ["yes", "no"], auto_select=False
         )
         if use_auto != "yes":
             return None
@@ -5074,11 +5097,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             if "autoyast" in t["filename"].lower() or "agama" in t["filename"].lower()
         ]
         if not templates:
-            print("No openSUSE/SLES auto-install templates found.")
+            print(StaticText.PREPARE_NO_TEMPLATES)
             return None
 
         selected = self._select_choice(
-            "Select Template",
+            StaticText.PREPARE_SELECT_TEMPLATE,
             templates,
             display_func=lambda t: f"{t['display_name']} - {t['description']}",
             value_func=lambda t: t["filename"],
@@ -5087,7 +5110,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         if not selected:
             return None
 
-        packages = self._get_input("Extra packages (comma-separated, optional): ").strip()
+        packages = self._get_input(StaticText.PREPARE_EXTRA_PACKAGES).strip()
         package_list = [p.strip() for p in packages.split(",") if p.strip()] if packages else []
 
         prefill = self.config.get("AUTO_INSTALL_PRE_FILL", {})
@@ -5121,7 +5144,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         use_prefill = False
         if has_prefill:
             use = self._select_choice(
-                "Use pre-filled auto-install settings from config?",
+                StaticText.PREPARE_USE_PREFILL,
                 ["yes", "no"],
                 auto_select=False,
             )
@@ -5140,12 +5163,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             }
         else:
             # No pre-fill (or declined): ask each field.
-            username = self._get_input("Username: ") or "admin"
-            user_password = self._get_password("User password: ")
-            root_password = self._get_password("Root password: ")
-            timezone = self._get_input("Timezone (e.g. Europe/Zurich): ") or "UTC"
-            keyboard = self._get_input("Keyboard layout (e.g. ch, us): ") or "us"
-            language = self._get_input("Language (e.g. German (Germany)): ") or "English (US)"
+            username = self._get_input(StaticText.PREPARE_USERNAME) or "admin"
+            user_password = self._get_password(StaticText.PREPARE_USER_PASSWORD)
+            root_password = self._get_password(StaticText.PREPARE_ROOT_PASSWORD)
+            timezone = self._get_input(StaticText.PREPARE_TIMEZONE) or "UTC"
+            keyboard = self._get_input(StaticText.PREPARE_KEYBOARD) or "us"
+            language = self._get_input(StaticText.PREPARE_LANGUAGE) or "English (US)"
             scc = self._ask_scc()
 
         return {
@@ -5166,15 +5189,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         """Ask for SCC registration interactively (no pre-fill proposal)."""
         enabled = (
             self._select_choice(
-                "Register with SUSE Customer Center (SCC)?", ["yes", "no"], auto_select=False
+                StaticText.PREPARE_SCC_REGISTER,
+                ["yes", "no"],
+                auto_select=False,
             )
             or "no"
         ) == "yes"
         if not enabled:
             return {}
         return {
-            "scc_email": self._get_input("SCC email: ") or "",
-            "scc_reg_code": self._get_password("SCC registration code: ") or "",
+            "scc_email": self._get_input(StaticText.PREPARE_SCC_EMAIL) or "",
+            "scc_reg_code": self._get_password(StaticText.PREPARE_SCC_REG_CODE) or "",
         }
 
     def _prepare_post_install(self):
@@ -5187,13 +5212,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         shell redirection are not mangled.
         """
         use = self._select_choice(
-            "Add post-install commands (run during auto-install)?",
+            StaticText.PREPARE_POST_INSTALL_ASK,
             ["yes", "no"],
             auto_select=False,
         )
         if use != "yes":
             return None
-        print("Enter one post-install command per line (blank line to finish):")
+        print(StaticText.PREPARE_POST_INSTALL_HELP)
         commands = []
         while True:
             line = self._get_input("  ").strip()
@@ -5205,17 +5230,27 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         return {"commands": commands}
 
     def _write_json(self, path, cfg):
-        """Write a config dict as pretty JSON, creating parent dirs as needed."""
+        """Write a config dict as pretty JSON, creating parent dirs as needed.
+
+        Returns whether the answer reached the disk. A path that cannot be written is
+        answered with a sentence rather than a traceback reaching the prompt, so the
+        caller knows to stop talking about a file it did not write.
+        """
         p = Path(path).expanduser()
-        p.parent.mkdir(parents=True, exist_ok=True)
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(cfg, f, indent=2)
-            f.write("\n")
+        try:
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with open(p, "w", encoding="utf-8") as f:
+                json.dump(cfg, f, indent=2)
+                f.write("\n")
+        except OSError as e:
+            print(StaticText.PREPARE_CONFIG_WRITE_FAILED_TEMPLATE.format(path=p, error=e))
+            return False
         deploy_dir = (Path.home() / ".config" / AppInfo.name / "deploy").resolve()
         hint = p.name if p.resolve().parent == deploy_dir else str(p)
-        print(f"\nDeployment config written to: {p}")
-        print(f"Run it with: vmc --json {p}")
-        print(f"or, interactively: deploy_vm {hint}")
+        print(StaticText.PREPARE_CONFIG_WRITTEN_TEMPLATE.format(path=p))
+        print(StaticText.PREPARE_CONFIG_RUN_TEMPLATE.format(path=p))
+        print(StaticText.PREPARE_CONFIG_DEPLOY_VM_TEMPLATE.format(command=hint))
+        return True
 
     def _write_skeleton_json(self, path):
         """Write an example deployment JSON skeleton (no server probing)."""

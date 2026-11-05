@@ -881,6 +881,69 @@ Specify the NUMA nodes to use.
     IN_PROGRESS_TITLE = _("In Progress")
     QUICK_INFO_TITLE = _("Quick Info")
 
+    # vmanager_cmd.py: what `prepare_json` asks with, and what it says once the answer
+    # is written. Translated, because these are put to a person at a terminal: no machine
+    # command reaches them (`--machine` has no prepare route and never writes a file), so
+    # none of them is a contract field. See docs/adr/0001.
+    PREPARE_NOT_CONNECTED = _("Not connected to any server. Use 'connect <server_name>' first.")
+    PREPARE_SELECT_SERVER = _("Select Server")
+    PREPARE_ENTER_VM_NAME = _("Enter VM name: ")
+    PREPARE_VM_NAME_REQUIRED = _("VM name is required.")
+    PREPARE_SELECT_VM_TYPE = _("Select VM Type")
+    PREPARE_MEMORY_GB = _("Memory (GB)")
+    PREPARE_VCPU = _("vCPU")
+    PREPARE_DISK_SIZE_GB = _("Disk size (GB)")
+    PREPARE_NO_ISO = _("Could not select an ISO.")
+    PREPARE_SELECT_NETWORK = _("Select Network")
+    PREPARE_SELECT_BOOT_MODE = _("Select Boot Mode")
+    PREPARE_SELECT_GRAPHICS = _("Select Graphics")
+    PREPARE_START_AFTER_INSTALL = _("Start VM after installation?")
+    PREPARE_ENTER_A_NUMBER = _("Please enter a number.")
+    PREPARE_NON_NEGATIVE_INTEGER = _("Must be a non-negative integer.")
+    PREPARE_POSITIVE_NUMBER = _("Must be a positive number.")
+    # The ISO choice. The four sources are also what `_prepare_iso` branches on, so a label
+    # and the comparison against it name the same constant rather than agreeing by hand.
+    # The cached source reuses `CACHED_ISOS` above rather than saying it twice.
+    PREPARE_ISO_SOURCE_REPOSITORY = _("Distribution repository")
+    PREPARE_ISO_SOURCE_POOL = _("Pool volumes")
+    PREPARE_ISO_SOURCE_CUSTOM = _("Custom URL/Path")
+    PREPARE_SELECT_ISO_SOURCE = _("Select ISO Source")
+    PREPARE_NO_VERSIONS = _("No openSUSE/SLES versions found.")
+    PREPARE_SELECT_VERSION = _("Select Version")
+    PREPARE_FETCHING_ISOS_TEMPLATE = _("Fetching available ISOs for {version}...")
+    PREPARE_NO_ISOS_FOR_VERSION = _("No ISOs found for this version.")
+    PREPARE_SELECT_ISO_IMAGE = _("Select ISO Image")
+    PREPARE_NO_CACHED_ISOS = _("No cached ISOs found.")
+    PREPARE_SELECT_CACHED_ISO = _("Select Cached ISO")
+    PREPARE_NO_ISO_VOLUMES = _("No ISO volumes found in active pools.")
+    PREPARE_SELECT_ISO_VOLUME = _("Select ISO Volume")
+    PREPARE_ENTER_CUSTOM_ISO = _("Enter custom ISO URL or absolute path: ")
+    # The auto-install settings. The three secrets are asked with getpass; only their
+    # prompts are wording, never the values.
+    PREPARE_USE_AUTOINSTALL = _("Use automated installation?")
+    PREPARE_NO_TEMPLATES = _("No openSUSE/SLES auto-install templates found.")
+    PREPARE_SELECT_TEMPLATE = _("Select Template")
+    PREPARE_EXTRA_PACKAGES = _("Extra packages (comma-separated, optional): ")
+    PREPARE_USE_PREFILL = _("Use pre-filled auto-install settings from config?")
+    PREPARE_USERNAME = _("Username: ")
+    PREPARE_USER_PASSWORD = _("User password: ")
+    PREPARE_ROOT_PASSWORD = _("Root password: ")
+    PREPARE_TIMEZONE = _("Timezone (e.g. Europe/Zurich): ")
+    PREPARE_KEYBOARD = _("Keyboard layout (e.g. ch, us): ")
+    PREPARE_LANGUAGE = _("Language (e.g. German (Germany)): ")
+    PREPARE_SCC_REGISTER = _("Register with SUSE Customer Center (SCC)?")
+    PREPARE_SCC_EMAIL = _("SCC email: ")
+    PREPARE_SCC_REG_CODE = _("SCC registration code: ")
+    PREPARE_POST_INSTALL_ASK = _("Add post-install commands (run during auto-install)?")
+    PREPARE_POST_INSTALL_HELP = _("Enter one post-install command per line (blank line to finish):")
+    # Writing the answer back, and the one way that fails.
+    PREPARE_CONFIG_WRITTEN_TEMPLATE = _("\nDeployment config written to: {path}")
+    PREPARE_CONFIG_RUN_TEMPLATE = _("Run it with: vmc --json {path}")
+    PREPARE_CONFIG_DEPLOY_VM_TEMPLATE = _("or, interactively: deploy_vm {command}")
+    PREPARE_CONFIG_WRITE_FAILED_TEMPLATE = _(
+        "Could not write the deployment config to {path}: {error}"
+    )
+
 
 class SparklineLabels:  # pylint: disable=too-few-public-methods
     """Constants for sparkline labels"""
