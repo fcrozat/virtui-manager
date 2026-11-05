@@ -458,7 +458,12 @@ were put in the pool's directory and the pool refreshed.
 `--dryrun` asks the question and changes nothing, on either route: no pool is
 made or started, no overlay volume is created, no domain is defined. The summary
 says what would be made — a disk that is not in the pool yet is reported as the
-overlay of its base that the deploy would create.
+overlay of its base that the deploy would create, and a pool that is defined but
+not started is reported as one the deploy would start. While a pool is down its
+volumes cannot be read at all, so a dry run does not answer whether they are in
+it and does not refuse a deploy for a volume it was never allowed to see; a
+volume a started pool does not have is still the deploy that cannot happen, and
+is answered 5 as it is without `--dryrun`.
 
 ### Managing deployment JSON files
 
@@ -561,17 +566,37 @@ info, so a run's log says what was served even when nobody was watching the
 terminal — which is the case for a caller whose install then failed, the moment
 the profile is most wanted.
 
-Before it, a long command may report what it is doing, one event per line:
+### Progress events
+
+Before the answer, a long command may report what it is doing, one event per line:
 
 ```json
 {"event": "progress", "stage": "install", "message": "Downloading the ISO", "percent": 45}
 ```
 
-`stage` says which part of the command is talking and is one of a small fixed
-set: `install` for a machine built from install media, `boot` for one booted
-from a volume the pool already holds. `message` is the detail — text for a
-human, never the stage repeated — and `percent` is how far along the command
-thinks it is, from 0 to 100.
+`stage` says which part of the command is talking. These are the words it holds,
+and all of them: a program switches on the stage the way it switches on an exit
+status, so no command gets to add one quietly.
+
+| Stage | Emitted by |
+| --- | --- |
+| `install` | a deploy building a machine from install media. |
+| `boot` | a deploy booting a machine from a volume the pool already holds. |
+| `upload` | `volume upload`, as the bytes go into the pool. |
+| `start` | `domain start`, once the machine is on. |
+| `shutdown` | `domain shutdown`, once the guest has been asked. |
+| `reboot` | `domain reboot`, once the guest has been asked. |
+| `destroy` | `domain destroy`, once the machine is off. |
+
+The words are the set in `MachineProgressStage` in `src/vmanager/constants.py`, and
+every command takes its stage from there. A stage added to the set needs its row
+here: `tests/test_cli_docs.py` reads the commands, the set and this table, and fails
+when they stop saying the same thing — a stage emitted and not listed leaves a
+script branching on a word it was never told about. `domain undefine` reports nothing
+at all, because the machine it removes has no state left to report afterwards.
+
+`message` is the detail — text for a human, never the stage repeated — and `percent`
+is how far along the command thinks it is, from 0 to 100.
 
 It is a number for a progress bar, so it only ever rises within one command: a
 step that would fall behind the highest percent already sent is reported at that
