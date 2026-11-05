@@ -38,6 +38,7 @@ from .config import load_config
 from .constants import AppInfo, StaticText
 from .firmware_manager import get_uefi_files, select_best_firmware
 from .libvirt_utils import get_host_architecture, get_latest_machine_types
+from .machine_mode import TIMEOUT_ERRORS
 from .provisioning.automation_engine import AutomationEngine
 from .provisioning.libosinfo_manager import LibosinfoManager
 from .provisioning.os_provider import OSType, OSVersion
@@ -67,6 +68,20 @@ def xml_value(value) -> str:
     is safe between tags and inside the single quotes this XML is written with.
     """
     return escape(str(value), {'"': "&quot;", "'": "&apos;"})
+
+
+def transfer_stalled(error: BaseException) -> bool:
+    """Whether a failed transfer failed because a wait ran out.
+
+    The download sets a socket timeout, so a mirror that stops sending bytes is
+    met in two shapes: a stall in the middle of the transfer is a
+    ``socket.timeout`` out of the read, and a stall while connecting is a
+    ``URLError`` carrying that timeout as its ``reason``. A refused connection
+    or a missing file is neither, and stays the failure it was.
+    """
+    if isinstance(error, TIMEOUT_ERRORS):
+        return True
+    return isinstance(getattr(error, "reason", None), TIMEOUT_ERRORS)
 
 
 class VMType(Enum):
@@ -505,9 +520,16 @@ class VMProvisioner:
                     os.remove(dest_path)  # Clean up partial file
                 except Exception:
                     pass
-            raise Exception(
-                ErrorMessages.CUSTOM_ISO_DOWNLOAD_FAILED_TEMPLATE.format(url=url, error=str(e))
-            ) from e
+            message = ErrorMessages.CUSTOM_ISO_DOWNLOAD_FAILED_TEMPLATE.format(
+                url=url, error=str(e)
+            )
+            # A mirror that stopped answering is not a mirror that refused, and
+            # the caller has to be able to tell them apart: re-raising a bare
+            # Exception here would flatten a stalled transfer into the same
+            # failure as a missing file, so the timeout keeps its kind.
+            if transfer_stalled(e):
+                raise TimeoutError(message) from e
+            raise Exception(message) from e
 
     def upload_iso(
         self,

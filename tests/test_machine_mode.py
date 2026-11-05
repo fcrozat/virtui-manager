@@ -5,6 +5,7 @@ Tests for the machine-readable output of vmc (--machine).
 import io
 import json
 import os
+import socket
 import sys
 import unittest
 from contextlib import contextmanager
@@ -23,10 +24,12 @@ from vmanager.machine_mode import (  # noqa: E402
     EXIT_USAGE,
     MACHINE_COMMANDS,
     PROTOCOL_VERSION,
+    TIMEOUT_ERRORS,
     MachineError,
     MachineSession,
     machine_command,
     run_command,
+    status_for_exception,
 )
 
 
@@ -174,6 +177,17 @@ class TestFailureStatuses(unittest.TestCase):
         session = MachineSession("deploy", stdout=stream)
 
         self.assertEqual(session.fail(TimeoutError("waited too long")), EXIT_TIMEOUT)
+
+    def test_a_stalled_socket_is_a_timeout_on_the_oldest_supported_python(self):
+        """3.9 keeps `socket.timeout` apart from `TimeoutError`, so both are caught.
+
+        From 3.10 the two are one object, so behaviour cannot tell a fix that
+        names both from one that names only `TimeoutError`; what has to hold on
+        the interpreter this project still supports is that `socket.timeout` is
+        in the pair the contract answers status 8 for.
+        """
+        self.assertIn(socket.timeout, TIMEOUT_ERRORS)
+        self.assertEqual(status_for_exception(socket.timeout("read timed out"))[0], EXIT_TIMEOUT)
 
     def test_an_unexpected_error_is_a_failure_not_a_success(self):
         stream = io.StringIO()

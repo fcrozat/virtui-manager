@@ -5,6 +5,8 @@ Tests for VManagerCMD class.
 import io
 import json
 import os
+import shutil
+import socket
 import sys
 import tempfile
 import unittest
@@ -891,6 +893,112 @@ class TestDeployFromConfig(unittest.TestCase):
         self.assertEqual(ctx.exception.status, EXIT_OPERATION)
         self.assertEqual(ctx.exception.code, "provision_failed")
         self.assertIn("no space left", str(ctx.exception))
+
+    def _mirror_that_stalls(self):
+        """A mirror that answers the request, then stops sending bytes."""
+        response = MagicMock()
+        response.getheader.return_value = "1024"
+        # What the read of a socket with a timeout raises when a transfer stalls.
+        response.read.side_effect = socket.timeout("The read operation timed out")
+        response.__enter__.return_value = response
+        return response
+
+    def _run_deploy_command(self, cfg_path, answer, provision, **mirror):
+        """Run `vmc --machine -C <file>` and return the status it exits with.
+
+        The whole command, so the status asserted below is the one a caller
+        gets: the answer object goes to `answer` where the session writes it.
+        `mirror` says how the download server behaves: `return_value` for a
+        response, `side_effect` for a refusal.
+        """
+        from vmanager.vmanager_cmd import main as cli_main
+
+        with (
+            patch("vmanager.vmanager_cmd.register_error_handler"),
+            patch("vmanager.vmanager_cmd.VManagerCMD", return_value=self.cmd),
+            patch("vmanager.vmanager_cmd.ensure_default_pool", return_value=True),
+            patch("vmanager.vmanager_cmd.ensure_default_network"),
+            patch("vmanager.vmanager_cmd.list_storage_pools"),
+            patch("vmanager.vmanager_cmd.list_networks"),
+            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov,
+            patch("vmanager.vm_provisioner.urllib.request.urlopen", **mirror),
+            patch("sys.__stdout__", answer),
+            patch("sys.stderr", new_callable=io.StringIO),
+            patch.object(sys, "argv", ["vmc", "--machine", "-C", cfg_path]),
+        ):
+            mock_prov.return_value.provision_vm.side_effect = provision
+            return cli_main()
+
+    def _download_media_as_the_provisioner_does(self, dest):
+        """A `provision_vm` that only downloads, with the real download code.
+
+        The stall has to come from the transfer and be classified by the real
+        ``download_iso``, so what is tested is the answer to a stalled mirror
+        rather than to an error the test invented.
+        """
+        from vmanager.vm_provisioner import VMProvisioner
+
+        def provision(**kwargs):
+            return VMProvisioner.download_iso(
+                MagicMock(), kwargs["iso_url"], dest, kwargs["progress_callback"]
+            )
+
+        return provision
+
+    def test_a_stalled_iso_download_is_answered_with_the_timeout_status(self):
+        """Install media that stops downloading is the case status 8 was written for."""
+        from vmanager.machine_mode import EXIT_TIMEOUT
+
+        url = "https://mirror.example/SLES-15.iso"
+        cfg_path = self._install_cfg(iso={"source": "url", "url": url})
+        conn = MagicMock()
+        conn.lookupByName.side_effect = self._no_domain_error()
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+        cache = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, cache, True)
+        answer = io.StringIO()
+
+        status = self._run_deploy_command(
+            cfg_path,
+            answer,
+            self._download_media_as_the_provisioner_does(os.path.join(cache, "SLES-15.iso")),
+            return_value=self._mirror_that_stalls(),
+        )
+
+        self.assertEqual(status, EXIT_TIMEOUT)
+        payload = json.loads(answer.getvalue())
+        self.assertEqual(payload["ok"], False)
+        self.assertEqual(payload["code"], "timeout")
+        self.assertIn(url, payload["message"])
+        self.assertIn("read operation timed out", payload["message"])
+
+    def test_a_mirror_that_refuses_the_download_is_still_a_failed_operation(self):
+        """Only a wait that ran out is status 8: a refused download stays 7."""
+        import urllib.error
+
+        from vmanager.machine_mode import EXIT_OPERATION
+
+        cfg_path = self._install_cfg()
+        conn = MagicMock()
+        conn.lookupByName.side_effect = self._no_domain_error()
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+        cache = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, cache, True)
+        answer = io.StringIO()
+
+        status = self._run_deploy_command(
+            cfg_path,
+            answer,
+            self._download_media_as_the_provisioner_does(os.path.join(cache, "y.iso")),
+            side_effect=urllib.error.URLError("404: Not Found"),
+        )
+
+        self.assertEqual(status, EXIT_OPERATION)
+        payload = json.loads(answer.getvalue())
+        self.assertEqual(payload["code"], "provision_failed")
+        self.assertIn("404", payload["message"])
 
     def test_deploy_without_a_session_keeps_printing(self):
         """A human still gets prose: nothing raises when nobody asked for JSON."""
