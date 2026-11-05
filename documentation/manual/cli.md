@@ -454,7 +454,12 @@ were put in the pool's directory and the pool refreshed.
 `--dryrun` asks the question and changes nothing, on either route: no pool is
 made or started, no overlay volume is created, no domain is defined. The summary
 says what would be made — a disk that is not in the pool yet is reported as the
-overlay of its base that the deploy would create.
+overlay of its base that the deploy would create, and a pool that is defined but
+not started is reported as one the deploy would start. While a pool is down its
+volumes cannot be read at all, so a dry run does not answer whether they are in
+it and does not refuse a deploy for a volume it was never allowed to see; a
+volume a started pool does not have is still the deploy that cannot happen, and
+is answered 5 as it is without `--dryrun`.
 
 ### Managing deployment JSON files
 
