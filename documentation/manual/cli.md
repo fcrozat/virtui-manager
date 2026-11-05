@@ -614,6 +614,14 @@ at all, because the machine it removes has no state left to report afterwards.
 `message` is the detail — text for a human, never the stage repeated — and `percent`
 is how far along the command thinks it is, from 0 to 100.
 
+`message` is not a word to branch on, and it does not pretend to be one: `stage` is
+English in every environment because a program switches on it, while `message` is the
+project's own prose and, on a deploy, is translated — so the same step can arrive in
+the caller's language. What the two deploy routes do share is the vocabulary: a
+machine built from install media and a machine booted from a volume both report
+`Defining VM` while they define one, and `Provisioning Complete` when they are done,
+so watching a machine come into being takes one set of words, not one per route.
+
 It is a number for a progress bar, so it only ever rises within one command: a
 step that would fall behind the highest percent already sent is reported at that
 percent, and a stage repeated without going further — finding the same ISO a

@@ -442,7 +442,7 @@ class VMProvisioner:
         if os.path.exists(dest_path) and os.path.getsize(dest_path) > 0:
             logging.info(f"ISO already exists at {dest_path}, skipping download.")
             if progress_callback:
-                progress_callback("ISO already exists", 100)
+                progress_callback(StaticText.PROVISIONING_ISO_ALREADY_EXISTS, 100)
             return dest_path
 
         logging.info(f"Downloading ISO from {url} to {dest_path}")
@@ -2599,12 +2599,12 @@ class VMProvisioner:
 
         loader_path = nvram_path = None
         if boot_uefi:
-            report("Preparing the UEFI variables", 20)
+            report(StaticText.PROVISIONING_SETTING_UP_UEFI_FIRMWARE, 20)
             loader_path, nvram_path = self._setup_uefi_nvram(
                 vm_name, storage_pool_name, VMType.SERVER
             )
 
-        report("Defining the machine", 40)
+        report(StaticText.PROVISIONING_DEFINING_VM, 40)
         xml = self._volume_boot_xml(
             VolumeBoot(
                 vm_name=vm_name,
@@ -2629,14 +2629,23 @@ class VMProvisioner:
             raise RuntimeError(f"libvirt refused the machine: {e}") from e
 
         if start:
-            report("Starting the machine", 60)
+            report(StaticText.PROVISIONING_STARTING_VM, 60)
             try:
                 if not domain.isActive():
                     domain.create(0)
             except libvirt.libvirtError as e:
                 raise RuntimeError(f"The machine is defined but would not start: {e}") from e
 
-        report(f"{vm_name} is {'running' if start else 'defined'}", 100)
+        # The shared word for "this deploy is done" when the machine is running, as an
+        # install's ending is; the ending a boot can be told to give has its own.
+        report(
+            (
+                StaticText.PROVISIONING_COMPLETE
+                if start
+                else StaticText.PROVISIONING_COMPLETE_NOT_STARTED
+            ),
+            100,
+        )
         return domain
 
     def _volume_boot_xml(self, boot: VolumeBoot) -> str:
@@ -3387,7 +3396,7 @@ class VMProvisioner:
                             local_iso_path, self.host_arch, remote_host=ssh_host
                         )
 
-                    report("Uploading kernel and initrd", 81)
+                    report(StaticText.PROVISIONING_UPLOADING_KERNEL_INITRD, 81)
                     kernel_path = self.upload_file(
                         local_kernel_path, storage_pool_name, f"{vm_name}-kernel"
                     )
@@ -3488,7 +3497,7 @@ class VMProvisioner:
                         local_iso_path, self.host_arch, remote_host=ssh_host
                     )
 
-                report("Uploading kernel and initrd", 81)
+                report(StaticText.PROVISIONING_UPLOADING_KERNEL_INITRD, 81)
                 kernel_path = self.upload_file(
                     local_kernel_path, storage_pool_name, f"{vm_name}-kernel"
                 )
@@ -3535,7 +3544,7 @@ class VMProvisioner:
                         internal_filename=internal_filename,
                         remote_host=ssh_host,
                     )
-                    report("Uploading automation floppy image", 82)
+                    report(StaticText.PROVISIONING_UPLOADING_AUTOMATION_IMAGE, 82)
                     automation_vol_name = f"{vm_name}-automation.img"
                     final_automation_path = self.upload_file(
                         floppy_image_path, storage_pool_name, volume_name=automation_vol_name
