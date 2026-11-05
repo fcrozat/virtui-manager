@@ -17,7 +17,7 @@ import xml.etree.ElementTree as ET
 
 import libvirt
 
-from .constants import MachineResourceText
+from .constants import MachineProgressStage, MachineResourceText
 from .libvirt_utils import get_host_resources, network_facts
 from .machine_mode import (
     EXIT_CONFIG,
@@ -588,7 +588,9 @@ def _volume_upload(conn, options, session):
                 sent += len(chunk)
                 if size:
                     session.progress(
-                        "upload", f"{name}: {sent // 1024 // 1024} MB", int(sent * 100 / size)
+                        MachineProgressStage.UPLOAD,
+                        f"{name}: {sent // 1024 // 1024} MB",
+                        int(sent * 100 / size),
                     )
         stream.finish()
     except Exception as e:
@@ -684,8 +686,9 @@ def _domain_command(app, args, session):
             EXIT_OPERATION,
             "operation_failed",
         ) from e
-    if session is not None and subcommand in ("start", "shutdown", "reboot", "destroy"):
-        session.progress(subcommand, f"{subcommand} {name}")
+    stage = DOMAIN_ACTION_STAGES.get(subcommand)
+    if session is not None and stage is not None:
+        session.progress(stage, f"{subcommand} {name}")
     _machine_changed(app, domain, gone=subcommand == "undefine")
     return {
         "name": name,
@@ -706,6 +709,19 @@ DOMAIN_LIFECYCLE = {
     "reboot": guest_reboot,
     "destroy": force_off_vm,
     "undefine": lambda domain: domain.undefineFlags(libvirt.VIR_DOMAIN_UNDEFINE_MANAGED_SAVE),
+}
+
+# Which of those actions report a progress event, and the stage each reports it as:
+# the action's own word, so a caller that branches on `start` keeps working. An
+# action with no entry here says nothing while it works — `undefine` is the one, and
+# it has no stage because the machine it removes has no state left to report. The
+# words are the set in `constants.py` and the manual lists them, so a stage cannot
+# join one side of that without the other.
+DOMAIN_ACTION_STAGES = {
+    "start": MachineProgressStage.START,
+    "shutdown": MachineProgressStage.SHUTDOWN,
+    "reboot": MachineProgressStage.REBOOT,
+    "destroy": MachineProgressStage.DESTROY,
 }
 
 
