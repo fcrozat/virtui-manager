@@ -4585,14 +4585,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 )
                 return
 
-        graphics = None if str(cfg["graphics"]).lower() in ("", "none") else cfg["graphics"]
-        # The machine a boot deploys asks for is the file's, less two things the
-        # route answers its own way: a disk booted from a volume has no size of
-        # its own to report, and no screen is spelled `none` here.
+        # The machine a boot deploys asks for is the file's, less the one thing this
+        # route answers its own way: a disk booted from a volume has no size of its
+        # own to report. The screen is the file's, verbatim, as on the install route:
+        # `null` is how a file asks for no screen, and it is what the answer carries,
+        # because the word a summary puts there (`_graphics_word`) is prose for the
+        # person reading a terminal, and a value a program reads back has to be one
+        # the file could have held.
         plan = replace(
             MachinePlan.of(cfg, server_name=server_name, vm_name=vm_name),
             disk_size_gb=None,
-            graphics=graphics or "none",
         )
 
         # The words are DeploySummaryText's, and so is their place: what an install
@@ -4660,7 +4662,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 network_name=plan.network,
                 storage_pool_name=plan.storage_pool,
                 boot_uefi=plan.boot_uefi,
-                graphics=graphics,
+                graphics=plan.graphics,
                 boot_device=cfg["boot"],
                 metadata=cfg["metadata"],
                 start=cfg["start"],

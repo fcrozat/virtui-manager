@@ -1117,6 +1117,27 @@ class TestDeployFromConfig(unittest.TestCase):
         answer = json.loads(json.dumps(result))
         self.assertIs(answer["running"], True)
 
+    def test_both_routes_answer_the_screen_the_file_asked_for(self):
+        """One file answers one `graphics`, whichever way the machine was made.
+
+        `null` is the only way a file asks for no screen, and it is the value both
+        routes hand the provisioner, so it is the value both answer with. A route
+        that spelled its own word there gave a caller two answers to one file, and
+        the word was not a word a file may hold: read back into a deploy file, it
+        is refused as a bad config.
+        """
+        for graphics in (None, "vnc", "spice"):
+            with self.subTest(graphics=graphics):
+                install = json.loads(
+                    json.dumps(self._deploy_an_install(self._install_cfg(graphics=graphics)))
+                )
+                boot = json.loads(
+                    json.dumps(self._deploy_a_boot_volume(self._boot_cfg(graphics=graphics)))
+                )
+
+                self.assertEqual(install["graphics"], graphics)
+                self.assertEqual(boot["graphics"], graphics)
+
     def test_the_answer_carries_the_profile_that_was_served(self):
         """A caller inspecting an install needs the URL the guest was told."""
         served = {
