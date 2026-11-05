@@ -2,12 +2,15 @@
 Tests for VMProvisioner ISO download and validation logic.
 """
 
-import unittest
-from unittest.mock import patch, MagicMock, mock_open
 import os
+import shutil
+import socket
 import sys
 import tempfile
-import shutil
+import unittest
+import urllib.error
+from unittest.mock import MagicMock, mock_open, patch
+
 import libvirt
 
 # Add the src directory to the path to import vmanager modules
@@ -92,6 +95,43 @@ class TestVMProvisionerDownload(unittest.TestCase):
 
         self.assertIn("Download failed", str(cm.exception))
         self.assertFalse(os.path.exists(self.dest_path))
+
+    @patch("vmanager.vm_provisioner.urllib.request.urlopen")
+    def test_download_iso_timeout_mid_transfer_is_a_timeout(self, mock_urlopen):
+        """Media that stops answering is a wait that ran out, told as one."""
+        response = MagicMock()
+        response.getheader.return_value = "1024"
+        response.read.side_effect = socket.timeout("The read operation timed out")
+        response.__enter__.return_value = response
+        mock_urlopen.return_value = response
+
+        with self.assertRaises(TimeoutError) as cm:
+            self.provisioner.download_iso(self.test_url, dest_path=self.dest_path)
+
+        self.assertIn("The read operation timed out", str(cm.exception))
+        self.assertFalse(os.path.exists(self.dest_path))
+
+    @patch("vmanager.vm_provisioner.urllib.request.urlopen")
+    def test_download_iso_timeout_while_connecting_is_a_timeout(self, mock_urlopen):
+        """A mirror never reached is the same wait, met as a URLError holding it."""
+        mock_urlopen.side_effect = urllib.error.URLError(socket.timeout("timed out"))
+
+        with self.assertRaises(TimeoutError) as cm:
+            self.provisioner.download_iso(self.test_url, dest_path=self.dest_path)
+
+        self.assertIn("timed out", str(cm.exception))
+        self.assertFalse(os.path.exists(self.dest_path))
+
+    @patch("vmanager.vm_provisioner.urllib.request.urlopen")
+    def test_download_iso_refused_connection_is_not_a_timeout(self, mock_urlopen):
+        """A refused mirror is a failed download, not a wait that ran out."""
+        mock_urlopen.side_effect = ConnectionRefusedError("connection refused")
+
+        with self.assertRaises(Exception) as cm:
+            self.provisioner.download_iso(self.test_url, dest_path=self.dest_path)
+
+        self.assertNotIsInstance(cm.exception, TimeoutError)
+        self.assertIn("connection refused", str(cm.exception))
 
     @patch("vmanager.vm_provisioner.urllib.request.urlopen")
     def test_download_iso_temp_path(self, mock_urlopen):
