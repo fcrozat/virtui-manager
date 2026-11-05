@@ -285,6 +285,37 @@ class TestLoadDeployConfig(unittest.TestCase):
         with self.assertRaises(DeployConfigError):
             load_deploy_config(path)
 
+    def _install_config(self, **extra):
+        cfg = {
+            "server": "s",
+            "vm_name": "x",
+            "vm_type": "server",
+            "iso": {"source": "url", "url": "u"},
+        }
+        cfg.update(extra)
+        return self._write(cfg)
+
+    def test_a_disk_format_hypervisor_cannot_use_is_a_config_error(self):
+        """A format is chosen from the ones QEMU can open a disk with.
+
+        Spelled here, where a bad one is an answer about the deploy file, rather
+        than by libvirt after the disk has been created and the seed placed.
+        """
+        for bad in ["qcow2' x='", "qcow2/><disk/>", "", "QCOW2"]:
+            with self.subTest(bad=bad):
+                with self.assertRaises(DeployConfigError):
+                    load_deploy_config(self._install_config(disk_format=bad))
+
+    def test_a_disk_format_hypervisor_can_use_is_kept(self):
+        for good in ["qcow2", "raw", "vmdk"]:
+            with self.subTest(good=good):
+                cfg = load_deploy_config(self._install_config(disk_format=good))
+                self.assertEqual(cfg["disk_format"], good)
+
+    def test_no_disk_format_is_still_no_format(self):
+        cfg = load_deploy_config(self._install_config())
+        self.assertIsNone(cfg["disk_format"])
+
 
 class TestOpenSUSEPackages(unittest.TestCase):
     """Extra packages must be injected into AutoYaST XML and Agama JSON."""
@@ -321,6 +352,34 @@ class TestOpenSUSEPackages(unittest.TestCase):
         self.assertIn("<package>ssh</package>", content)
         self.assertIn("<package>vim-extra</package>", content)
         self.assertLess(content.index("<package>ssh</package>"), content.index("</packages>"))
+
+    def test_a_package_name_holding_markup_is_still_one_package(self):
+        """A package name is a name, not a fragment of the answer file.
+
+        A name carrying `&` or `<` written into the profile unescaped would make
+        the AutoYaST profile unparseable, and the machine would fail in the
+        installer rather than here.
+        """
+        hostile = "we&rd<pkg>"
+        out = self.engine.generate(
+            os_type=OSType.OPENSUSE,
+            version_id="24.3",
+            vm_name="web05",
+            user_config={
+                "template_name": "autoyast-server.xml",
+                "root_password": "root",
+                "username": "admin",
+                "user_password": "pw",
+                "packages": [hostile, "ssh"],
+            },
+            output_path=self.tmp,
+            template_name="autoyast-server.xml",
+        )
+        profile = ET.fromstring(out.read_text())
+        # The profile puts its elements in a namespace, so match on the local name.
+        written = [el.text for el in profile.iter() if el.tag.rsplit("}", 1)[-1] == "package"]
+        self.assertIn(hostile, written)
+        self.assertIn("ssh", written)
 
     def test_agama_packages_appended(self):
         out = self.engine.generate(

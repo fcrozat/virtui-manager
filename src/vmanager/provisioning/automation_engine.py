@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..utils import xml_value
 from .os_provider import OSType, hash_password
 
 
@@ -373,6 +374,10 @@ reboot
 
         No-op (with a warning) if the template has no ``</packages>`` anchor,
         so templates that already hardcode their package set keep working.
+
+        A package name is a name, not markup: it is escaped on the way in, so a
+        profile asking for a package written with `&` or a quote still yields one
+        package rather than a document the installer cannot read.
         """
         pkgs = [str(p).strip() for p in packages if str(p).strip()]
         if not pkgs:
@@ -383,7 +388,7 @@ reboot
                 "AutoYaST template has no <packages> section; extra packages ignored"
             )
             return content
-        block = "".join(f"            <package>{p}</package>\n" for p in pkgs)
+        block = "".join(f"            <package>{xml_value(p)}</package>\n" for p in pkgs)
         return content.replace(anchor, block + anchor, 1)
 
     def _apply_agama_packages(self, content: str, packages: List[str]) -> str:

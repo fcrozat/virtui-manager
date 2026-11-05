@@ -84,6 +84,27 @@ class InstallXmlTest(unittest.TestCase):
     def test_an_install_with_no_seed_has_only_the_media(self):
         self.assertEqual(len(self.cdroms(self.install())), 1)
 
+    def test_a_disk_format_holding_markup_is_still_one_value(self):
+        """The format named in a deploy file is a value, not a fragment of XML.
+
+        `disk_format` is the one fact about the disk the caller writes itself on
+        this route, so it is the one that can close the `driver` element and put
+        anything after it in the document.
+        """
+        hostile = "qcow2' x='"
+        xml = self.install(disk_format=hostile)
+        driver = xml.find("devices/disk/driver")
+        self.assertIsNotNone(driver)
+        self.assertEqual(driver.get("type"), hostile)
+
+    def test_a_disk_format_holding_a_tag_leaves_the_document_one_disk(self):
+        """Markup in the format cannot open a disk of its own."""
+        xml = self.install(disk_format="qcow2/><disk type='network'/>")
+        devices = xml.find("devices")
+        self.assertIsNotNone(devices)
+        # The disk the machine lives on, and the install media. Nothing else.
+        self.assertEqual(len(devices.findall("disk")), 2)
+
 
 class VolumeBootXmlTest(unittest.TestCase):
     def setUp(self):
@@ -183,6 +204,20 @@ class VolumeBootXmlTest(unittest.TestCase):
     def test_a_value_cannot_close_the_element_it_is_in(self):
         xml = self.boot(metadata={"name": "</properties><evil/>"})
         self.assertEqual(len(xml.find(f"metadata/{{{METADATA_NS}}}properties")), 1)
+
+    def test_a_disk_format_holding_markup_is_still_one_value(self):
+        """The format the volume is read as goes in escaped, whatever it says.
+
+        On this route the format is usually libvirt's own answer about the volume
+        rather than the caller's words, so it is not the reachable leak — but a
+        volume XML with a surprise in it must not be able to write the domain
+        either.
+        """
+        hostile = "qcow2' x='"
+        xml = self.boot(disk_format=hostile)
+        driver = xml.find("devices/disk/driver")
+        self.assertIsNotNone(driver)
+        self.assertEqual(driver.get("type"), hostile)
 
     def test_the_machine_starts_unless_the_caller_says_otherwise(self):
         domain = MagicMock()
