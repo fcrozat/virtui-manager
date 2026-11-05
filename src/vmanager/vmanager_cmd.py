@@ -4443,7 +4443,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         from dataclasses import replace
 
         from .deploy_config import MachinePlan
-        from .storage_manager import _ensure_pool_active, create_overlay_volume
+        from .storage_manager import (
+            _ensure_pool_active,
+            _safe_is_pool_active,
+            create_overlay_volume,
+        )
 
         pool_name = cfg["storage_pool"]
         disk_volume = cfg["disk_volume"]
@@ -4454,16 +4458,29 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 f"No storage pool '{pool_name}' on {server_name}.", EXIT_NOT_FOUND, "not_found"
             )
             return
+        # The pool a dry run would have to bring up but may not touch: while it
+        # is down its volumes cannot be read at all, so the dry run has to say
+        # that instead of asking the pool a question it cannot answer.
+        would_start_pool = False
         if not dryrun:
             # Bringing a pool up is a change of its own, so a dry run only reads.
             _ensure_pool_active(pool)
+        elif not _safe_is_pool_active(pool):
+            would_start_pool = True
 
         def volume_path(name):
+            """Where a volume of this pool is, and how it is formatted."""
             return self._volume_path(pool, name)
 
+        # While a pool is down it cannot answer about any volume of it, and
+        # "cannot answer" is not "not there": a dry run may not start the pool,
+        # so it must not refuse a deploy over a volume it was never allowed to
+        # see. Each check that reads a missing volume as a refusal is therefore
+        # asked only of a pool that could answer. A path a dry run leaves unread
+        # is of no use below its own summary, which names volumes.
         disk_path, disk_format = volume_path(disk_volume)
         would_create = False
-        if disk_path is None and cfg["backing_volume"]:
+        if not would_start_pool and disk_path is None and cfg["backing_volume"]:
             backing_path, _ = volume_path(cfg["backing_volume"])
             if backing_path is None:
                 self._deploy_fail(
@@ -4488,7 +4505,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                         "operation_failed",
                     )
                     return
-        if disk_path is None and not would_create:
+        if not would_start_pool and disk_path is None and not would_create:
             self._deploy_fail(
                 f"No volume '{disk_volume}' in the pool '{pool_name}'.",
                 EXIT_NOT_FOUND,
@@ -4499,7 +4516,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         seed_path = None
         if cfg["seed_volume"]:
             seed_path, _ = volume_path(cfg["seed_volume"])
-            if seed_path is None:
+            if not would_start_pool and seed_path is None:
                 self._deploy_fail(
                     f"No seed volume '{cfg['seed_volume']}' in '{pool_name}'.",
                     EXIT_NOT_FOUND,
@@ -4521,6 +4538,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             print("\n--- Summary of Actions (dry run) ---")
             print(f"VM Name: {vm_name}")
             print(f"Server: {server_name}")
+            if would_start_pool:
+                print(f"Storage pool: {pool_name} would be started")
             print(f"Boots the volume: {disk_volume} ({disk_format or 'unknown format'})")
             if cfg["backing_volume"]:
                 verb = "would be made as" if would_create else "as"

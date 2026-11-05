@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 
 from vmanager.constants import AppInfo
 from vmanager.deploy_config import load_deploy_config
+from vmanager.machine_mode import EXIT_OK
 from vmanager.vmanager_cmd import VManagerCMD
 
 
@@ -355,16 +356,27 @@ class TestDeployFromConfig(unittest.TestCase):
             }
         )
 
-    def _boot_dry_run(self, cfg_path, present):
-        """Run a boot deploy with `dryrun` and give back what the hypervisor saw."""
+    def _boot_dry_run(self, cfg_path, present, active=False):
+        """Run a boot deploy with `dryrun` and give back what the hypervisor saw.
+
+        `active` is whether the pool is started, which decides whether its
+        volumes can be read at all. The deploy runs under a machine session so
+        that a test reads the status a caller reads: the prose a dry run prints
+        names the volume whether it found it or refused the deploy for it, so a
+        test that looks for a name cannot tell the two apart.
+        """
+        from vmanager.machine_mode import MachineError, MachineSession
+
         conn = MagicMock()
         conn.lookupByName.side_effect = self._no_domain_error()
         pool = self._pool_with(*present)
-        pool.isActive.return_value = False  # A dry run may not start it either.
+        pool.isActive.return_value = active
         conn.storagePoolLookupByName.return_value = pool
         self.cmd.active_connections["local"] = conn
         self.cmd._connect_one = MagicMock(return_value="local")
 
+        answer = io.StringIO()
+        session = MachineSession("deploy", stdout=answer)
         with (
             patch("vmanager.storage_manager.create_overlay_volume") as overlay,
             patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov,
@@ -372,39 +384,108 @@ class TestDeployFromConfig(unittest.TestCase):
             patch("vmanager.vmanager_cmd.list_networks"),
             redirect_stdout(io.StringIO()) as buf,
         ):
-            result = self.cmd.deploy_from_config(cfg_path, dryrun=True)
-        return result, buf.getvalue(), conn, pool, overlay, mock_prov
+            try:
+                result = self.cmd.deploy_from_config(cfg_path, dryrun=True, session=session)
+            except MachineError as error:
+                status = session.fail(error)  # What `vmc --machine` answers.
+            else:
+                status = session.succeed(result)
+        return result, buf.getvalue(), conn, pool, overlay, mock_prov, status
 
     def test_a_dry_run_of_an_overlay_deploy_makes_no_volume(self):
-        """The overlay is the artifact a dry run is asked about most."""
+        """The overlay is the artifact a dry run is asked about most.
+
+        The pool is started here, because only a started pool can be asked
+        whether the disk is in it yet: that is what the summary reports the
+        deploy would make.
+        """
         cfg_path = self._overlay_cfg()
-        _result, out, _conn, _pool, overlay, _prov = self._boot_dry_run(
-            cfg_path, present=["base", "sidekick-worker01-seed"]
+        result, out, _conn, pool, overlay, _prov, status = self._boot_dry_run(
+            cfg_path, present=["base", "sidekick-worker01-seed"], active=True
         )
+        self.assertEqual(status, EXIT_OK)
+        self.assertTrue(result["dryrun"])
         overlay.assert_not_called()
-        self.assertIn("base", out)
-        self.assertIn("sidekick-worker01", out)
+        self.assertIn("would be made as an overlay of: base", out)
+        self.assertNotIn("would be started", out, "a started pool has nothing to start")
 
     def test_a_dry_run_of_a_boot_deploy_defines_no_domain(self):
         """Even when everything it names is there, a dry run defines nothing."""
         cfg_path = self._boot_cfg()
-        _result, _out, _conn, _pool, _overlay, prov = self._boot_dry_run(
+        _result, _out, _conn, _pool, _overlay, prov, status = self._boot_dry_run(
             cfg_path, present=["sidekick-worker01", "sidekick-worker01-seed"]
         )
+        self.assertEqual(status, EXIT_OK)
         prov.return_value.provision_existing_volume.assert_not_called()
 
     def test_a_dry_run_leaves_the_hypervisor_alone(self):
         """Nothing the hypervisor could still carry away after a dry run."""
         cfg_path = self._overlay_cfg()
-        result, _out, conn, pool, _overlay, _prov = self._boot_dry_run(
+        result, _out, conn, pool, _overlay, _prov, status = self._boot_dry_run(
             cfg_path, present=["base", "sidekick-worker01-seed"]
         )
         for seen in (conn, pool):
             touched = {call[0] for call in seen.method_calls}
             self.assertEqual(touched & self.MUTATING, set())
+        self.assertEqual(status, EXIT_OK)
+        self.assertFalse(pool.isActive(), "a dry run leaves the pool as it found it")
         self.assertTrue(result["dryrun"])
         self.assertEqual(result["domain"], "sidekick-worker01")
         self.assertEqual(result["volume"], "sidekick-worker01")
+
+    def test_a_dry_run_reports_a_pool_it_would_start(self):
+        """A pool that is defined but not started cannot be read, so say it would start.
+
+        While a pool is down libvirt answers "no such volume" for every volume in
+        it, so a dry run that may not start the pool used to refuse, with status
+        5, a deploy that would have booted. A caller checking a config before
+        spending an hour on it was told the config was wrong.
+        """
+        cfg_path = self._boot_cfg()
+        result, out, _conn, pool, overlay, prov, status = self._boot_dry_run(
+            cfg_path, present=["sidekick-worker01", "sidekick-worker01-seed"]
+        )
+        self.assertEqual(status, EXIT_OK)
+        self.assertIn("Storage pool: default would be started", out)
+        self.assertTrue(result["dryrun"])
+        self.assertEqual(result["volume"], "sidekick-worker01")
+        # What would be, and nothing of it done.
+        self.assertFalse(pool.isActive())
+        pool.create.assert_not_called()
+        overlay.assert_not_called()
+        prov.return_value.provision_existing_volume.assert_not_called()
+
+    def test_a_dry_run_answers_five_for_a_volume_a_started_pool_lacks(self):
+        """A pool that can be read still answers for the volume that is not in it.
+
+        The other way this route fails must not be softened with it: the volume
+        the pool names as missing is the deploy that cannot happen, and says so
+        in the same words a deploy without `dryrun` says it.
+        """
+        from vmanager.machine_mode import EXIT_NOT_FOUND, MachineError, MachineSession
+
+        cfg_path = self._boot_cfg()
+        conn = MagicMock()
+        conn.lookupByName.side_effect = self._no_domain_error()
+        # _pool_with is started unless a test says otherwise: this volume is
+        # absent from a pool that was asked, not from a pool that could not answer.
+        conn.storagePoolLookupByName.return_value = self._pool_with("another-disk")
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+
+        with (
+            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov,
+            redirect_stdout(io.StringIO()),
+        ):
+            with self.assertRaises(MachineError) as raised:
+                self.cmd.deploy_from_config(cfg_path, dryrun=True, session=MachineSession("deploy"))
+
+        self.assertEqual(raised.exception.status, EXIT_NOT_FOUND)
+        self.assertEqual(raised.exception.code, "not_found")
+        self.assertEqual(
+            str(raised.exception), "No volume 'sidekick-worker01' in the pool 'default'."
+        )
+        mock_prov.return_value.provision_existing_volume.assert_not_called()
 
     def test_deploy_from_config_vm_exists(self):
 
@@ -487,13 +568,21 @@ class TestDeployFromConfig(unittest.TestCase):
         return self._write_cfg(cfg)
 
     def _pool_with(self, *names):
-        """A pool that answers for those volumes, and no others."""
+        """A pool that answers for those volumes, and no others.
+
+        A pool that is not started answers "no such volume" for every name, the
+        way the binding does: libvirt cannot enumerate a pool it has not
+        activated. A double that answered regardless of `isActive()` lets a dry
+        run read volumes no deploy could reach, and hides what a dry run says
+        about a pool it may not start.
+        """
         import libvirt
 
         pool = MagicMock()
+        pool.isActive.return_value = True  # A pool is started unless a test says so.
 
         def lookup(name):
-            if name not in names:
+            if not pool.isActive() or name not in names:
                 raise libvirt.libvirtError("No such volume")
             volume = MagicMock()
             volume.path.return_value = f"/var/lib/libvirt/images/{name}.qcow2"
