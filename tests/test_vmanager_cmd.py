@@ -5,6 +5,7 @@ Tests for VManagerCMD class.
 import io
 import json
 import os
+import re
 import shutil
 import socket
 import sys
@@ -17,7 +18,7 @@ from unittest.mock import MagicMock, patch
 # Add the src directory to the path to import vmanager modules
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
-from vmanager.constants import AppInfo
+from vmanager.constants import AppInfo, DeploySummaryText
 from vmanager.deploy_config import load_deploy_config
 from vmanager.machine_mode import EXIT_OK
 from vmanager.vmanager_cmd import VManagerCMD
@@ -488,6 +489,186 @@ class TestDeployFromConfig(unittest.TestCase):
             str(raised.exception), "No volume 'sidekick-worker01' in the pool 'default'."
         )
         mock_prov.return_value.provision_existing_volume.assert_not_called()
+
+    # --- the two dry-run summaries, label by label -------------------------------------
+    #
+    # A dry run is read by a person deciding whether to run the deploy, so the two
+    # summaries are one contract: the same label for the same thing, in the same
+    # order, with nothing the deploy would do left unmentioned.
+
+    # What both routes do, and so both have to name, in the order they name it.
+    # `VM Type`, `ISO`, `Boots the volume` and `Boot order` are left out on purpose:
+    # one route installs and the other boots a disk it already has, so those are two
+    # different facts, not one fact said twice.
+    SHARED_LABELS = (
+        "VM Name:",
+        "Server:",
+        "Memory:",
+        "Seed CD-ROM:",
+        "Network:",
+        "Storage Pool:",
+        "Boot Mode:",
+        "Graphics:",
+    )
+
+    def _install_dry_run(self, cfg_path, pool=None):
+        """An install dry run, with the summary it printed and what it was given.
+
+        The mirror of `_boot_dry_run` for the other route, so one test can read both
+        summaries. The provisioner comes back too: asking what would happen is not
+        permission to make it happen.
+        """
+        conn = MagicMock()
+        conn.lookupByName.side_effect = self._no_domain_error()
+        conn.storagePoolLookupByName.return_value = pool or self._pool_with("seed-a")
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+        with (
+            patch("vmanager.vmanager_cmd.ensure_default_pool", return_value=True),
+            patch("vmanager.vmanager_cmd.ensure_default_network"),
+            patch("vmanager.vmanager_cmd.list_storage_pools"),
+            patch("vmanager.vmanager_cmd.list_networks"),
+            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov,
+            redirect_stdout(io.StringIO()) as buf,
+        ):
+            result = self.cmd.deploy_from_config(cfg_path, dryrun=True)
+        return result, buf.getvalue(), mock_prov
+
+    @staticmethod
+    def _summary_labels(out):
+        """The label of every labelled line of a summary, in the order printed."""
+        return [f"{line.split(':', 1)[0]}:" for line in out.splitlines() if ": " in line]
+
+    def test_both_dry_run_summaries_share_their_labels_and_their_order(self):
+        """The same thing is named with the same words, in the same place.
+
+        Each route used to write its own block, so a label could appear in one and
+        never reach the other; this is the guard that keeps the two from drifting.
+        Nothing is provisioned while asking, on either route.
+        """
+        _result, install_out, install_prov = self._install_dry_run(
+            self._install_cfg(seed={"volume": "seed-a"})
+        )
+        _result, boot_out, _conn, _pool, _overlay, boot_prov, _status = self._boot_dry_run(
+            self._boot_cfg(), present=["sidekick-worker01", "sidekick-worker01-seed"], active=True
+        )
+        install_prov.return_value.provision_vm.assert_not_called()
+        boot_prov.return_value.provision_existing_volume.assert_not_called()
+
+        install_header = [line for line in install_out.splitlines() if line.startswith("---")]
+        boot_header = [line for line in boot_out.splitlines() if line.startswith("---")]
+        self.assertEqual(install_header, boot_header)
+        self.assertTrue(install_header, "a summary has to say it is a summary")
+
+        for out in (install_out, boot_out):
+            labels = [label for label in self._summary_labels(out) if label in self.SHARED_LABELS]
+            self.assertEqual(labels, list(self.SHARED_LABELS))
+
+    def test_a_boot_dry_run_names_the_pool_the_machine_lands_in(self):
+        """Both routes deploy into a pool, so both have to say which one.
+
+        The route that boots a volume resolved the pool, read its volumes and would
+        make the overlay in it, and named it only when it was down and would have to
+        be started.
+        """
+        _result, out, *_rest = self._boot_dry_run(
+            self._boot_cfg(), present=["sidekick-worker01", "sidekick-worker01-seed"], active=True
+        )
+        self.assertIn("Storage Pool: default", out)
+        self.assertNotIn("would be started", out, "a started pool has nothing to start")
+
+        _result, out, *_rest = self._boot_dry_run(
+            self._boot_cfg(storage_pool="sidekick"),
+            present=["sidekick-worker01", "sidekick-worker01-seed"],
+            active=True,
+        )
+        self.assertIn("Storage Pool: sidekick", out)
+
+    def test_both_dry_runs_name_the_screen_the_machine_would_get(self):
+        """A screen is a device the domain is defined with, on either route.
+
+        `null` asks for no screen and is one file's answer on both routes, so it is
+        one word in both summaries too — not `None` read back out of Python on one
+        and `none` as the file wrote it on the other.
+        """
+        for graphics, expected in (
+            (None, "Graphics: none"),
+            ("vnc", "Graphics: vnc"),
+            ("spice", "Graphics: spice"),
+        ):
+            with self.subTest(graphics=graphics):
+                _result, boot_out, *_rest = self._boot_dry_run(
+                    self._boot_cfg(graphics=graphics),
+                    present=["sidekick-worker01", "sidekick-worker01-seed"],
+                    active=True,
+                )
+                self.assertIn(expected, boot_out)
+
+                _result, install_out, _prov = self._install_dry_run(
+                    self._install_cfg(graphics=graphics)
+                )
+                self.assertIn(expected, install_out)
+
+    def test_both_dry_runs_say_whether_the_machine_would_be_started(self):
+        """`start` decides how the deploy ends, and no label named it on either route.
+
+        A deploy that ends with the machine running and one that ends with it
+        defined and stopped are two different answers to "what would this do".
+        """
+        for start, expected, absent in (
+            (None, "The machine would be started once it is defined.", "left defined"),
+            (False, "The machine would be left defined and stopped.", "would be started"),
+        ):
+            with self.subTest(start=start):
+                install_extra = {} if start is None else {"start": start}
+                _result, install_out, _prov = self._install_dry_run(
+                    self._install_cfg(**install_extra)
+                )
+                _result, boot_out, *_rest = self._boot_dry_run(
+                    self._boot_cfg(**install_extra),
+                    present=["sidekick-worker01", "sidekick-worker01-seed"],
+                    active=True,
+                )
+                for out in (install_out, boot_out):
+                    self.assertIn(expected, out)
+                    self.assertNotIn(absent, out)
+
+    def test_the_summaries_say_nothing_the_constants_do_not_hold(self):
+        """Every line of a summary is a line the constants module holds.
+
+        The two blocks are one contract written in two places: a sentence spelled
+        out at a call site is the drift this ticket is about, and cannot be told
+        apart from the shared wording by reading one of them.
+        """
+        patterns = [
+            re.compile("^" + ".*?".join(map(re.escape, re.split(r"\{\w+\}", piece))) + "$")
+            for value in vars(DeploySummaryText).values()
+            if isinstance(value, str)
+            for piece in value.splitlines()
+            if piece
+        ]
+        _result, install_out, _prov = self._install_dry_run(
+            self._install_cfg(
+                seed={"volume": "seed-a"},
+                autoinstall={
+                    "enabled": True,
+                    "template": "autoyast-server.xml",
+                    "packages": ["ssh", "vim"],
+                    "scc": {"scc_email": "a@b.c", "scc_reg_code": "XYZ"},
+                },
+                post_install={"commands": ["systemctl enable foo"]},
+            )
+        )
+        _result, boot_out, *_rest = self._boot_dry_run(
+            self._overlay_cfg(), present=["base", "sidekick-worker01-seed"], active=True
+        )
+        for out in (install_out, boot_out):
+            for line in out.splitlines():
+                if line.strip():
+                    self.assertTrue(
+                        any(pattern.match(line) for pattern in patterns),
+                        f"summary line held by no constant: {line!r}",
+                    )
 
     def test_deploy_from_config_vm_exists(self):
 
