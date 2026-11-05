@@ -3,9 +3,10 @@
 Documented with the rest of ``--machine`` in
 ``documentation/manual/cli.md``. A scripted caller needs the facts these commands
 report and the operations they perform, with an exit status that says what
-happened; the interactive commands print prose and swallow failures, so these
-handlers are separate. They are thin: they read the words of the command, call
-the helper the interactive command calls, and return the ``data`` dict.
+happened. These commands share the helpers the interactive commands call, and
+depart from that tool in three deliberate places, each recorded in ``docs/adr/``
+and listed in ``docs/adr/README.md``. They are thin: they read the words of the
+command, call the helper, and return the ``data`` dict.
 
 One connection serves a run. ``vmc -u <uri>`` connects to that hypervisor before
 the command runs, which is what ``_connection`` returns; a command never picks a
@@ -56,11 +57,11 @@ POOL_PARENT = "/var/lib/libvirt"
 # This is the one reading the machine surface does not share with the interactive
 # one: the interactive tool answers from the caches of `vm_service`, these commands
 # ask the hypervisor. Why, and what would make it wrong, is recorded in
-# documentation/architecture/decisions/0002-machine-commands-read-the-hypervisor-directly.md.
-# The names come from here rather than from `vm_queries.get_status`, which answers
-# the localized words a person reads, for the reason in decision 0001: a program
-# compares `running`, and a word it compares must not move. What is read is the
-# same call either way — `domain.info()`.
+# docs/adr/0002-machine-commands-read-the-hypervisor-directly.md. The names come
+# from here rather than from `vm_queries.get_status`, which answers the localized
+# words a person reads, for the reason in decision 0001: a program compares
+# `running`, and a word it compares must not move. What is read is the same call
+# either way — `domain.info()`.
 STATE_NAMES = {
     libvirt.VIR_DOMAIN_NOSTATE: "nostate",
     libvirt.VIR_DOMAIN_RUNNING: "running",
@@ -494,7 +495,7 @@ def _volume_command(app, args, session):
         # There is nothing to call: the Python binding does not wrap
         # `virStorageVolRename`, so this refuses and names the tool that can do it.
         # Why status 9, and why not a copy or a `virsh` call, is recorded in
-        # documentation/architecture/decisions/0003-renaming-a-volume-answers-status-9.md.
+        # docs/adr/0003-renaming-a-volume-answers-status-9.md.
         raise MachineError(
             MachineResourceText.VOLUME_RENAME_IS_NOT_POSSIBLE, EXIT_UNSUPPORTED, "unsupported"
         )

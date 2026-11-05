@@ -41,12 +41,23 @@ Three ways of making it work were considered and refused:
   `rename` is worse than a refusal.
 - **Reporting success anyway.** This is where the command was, functionally.
 
+If copy-and-delete is ever wanted, the honest shape of it is a different command —
+`volume copy` — with the free space and the broken links stated as its cost, and rename
+left refusing.
+
+What it costs: the command surface now carries a command that always fails. Keeping it
+rather than dropping it is deliberate — a caller who types it learns the refusal and the
+alternative, where dropping it would teach only that the name was never there, and the
+manual row and the `--new-name` option exist to carry that answer.
+
 ## What would make this wrong
 
 - **The binding grows the wrapper.** Check `hasattr(libvirt.virStorageVol, "rename")`.
-  The moment that is true, implement it and supersede this record. Note that
-  `documentation/manual/cli.md` currently says this status 9 "will not change", so the
-  manual moves with the code.
+  The moment that is true, implement it and supersede this record. The guard test in
+  `tests/test_machine_resources.py` proves every libvirt name this module calls exists on
+  the binding; it cannot notice a name the module stopped calling, so the check above has
+  to be made by hand. Note also that `documentation/manual/cli.md` currently says this
+  status 9 "will not change", so the manual moves with the code.
 - **Status 9 is carrying two meanings.** `cli.md` defines 9 as "the command has no
   machine-readable result in this version of vmc" — a statement about *this version*,
   which reads as temporary — while `volume rename` uses it for something that is not

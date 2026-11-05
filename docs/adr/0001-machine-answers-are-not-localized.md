@@ -18,7 +18,9 @@ the strings a `--dryrun` reports and to what a deploy failure answers with.
 
 The words a machine caller is answered with are **not** passed through `_()`. They live
 in `constants.py` in `MachineModeText`, `MachineResourceText` and `DeployText`, and they
-stay in one language in every environment.
+stay in one language in every environment. So do the two vocabularies a caller switches
+on rather than reads: the domain state names in `STATE_NAMES` (`machine_resources.py`)
+and the progress stages in `MachineProgressStage`.
 
 ## Why
 
@@ -38,6 +40,15 @@ Shipping both — a translated message and a stable one — was refused because 
 fields under an obligation to stay in step for the benefit of a reader who can already
 read one of them.
 
+One seam is worth naming rather than pretending otherwise. A progress event carries
+`stage`, which is a name from `MachineProgressStage` and therefore English, and
+`message`, which is the operation's own text: on the deploy route that text comes out of
+`StaticText`, and `StaticText` *is* translated. So a progress message can arrive in the
+caller's language while the stage beside it cannot. What this decision covers is the
+words a caller compares and the words a failure answers with; the prose that streams
+beside a percentage is not one of them, and a caller that needs a stable progress word
+must read `stage`.
+
 ## What would make this wrong
 
 - If a caller starts branching on `message` rather than on `code` — which is how such a
@@ -47,9 +58,18 @@ read one of them.
 - If the project decides to translate everything, including the JSON answers, then this
   record is the thing to argue with, and the argument has to include what happens to a
   caller whose `LANG` changes between two runs.
+- If `_()` appears around one of these strings, in the code or in a translation
+  catalogue, that is this decision being broken rather than revised — the fix is to
+  remove it, not to argue it here.
+- If one of these words changes without `PROTOCOL_VERSION` in `machine_mode.py`
+  changing with it, the contract moved without saying so. `code`, `stage` and the state
+  names are the fields a program compares, so a reword of any of them is a version bump,
+  not a copy edit.
 
 ## Where this shows in the code
 
 `src/vmanager/constants.py`, the docstrings of `MachineModeText`, `MachineResourceText`
-and `DeployText`. `tests/test_deploy_wording.py` pins a class of these wordings; the
-rest are pinned by the manual.
+and `DeployText`; `STATE_NAMES` in `src/vmanager/machine_resources.py`.
+`tests/test_deploy_wording.py` pins a class of these wordings; the rest are pinned by
+`documentation/manual/cli.md`, which is published with the site and so moves with the
+words.
