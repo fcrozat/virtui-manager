@@ -410,7 +410,7 @@ class TestDeployFromConfig(unittest.TestCase):
         self.assertTrue(result["dryrun"])
         overlay.assert_not_called()
         self.assertIn("would be made as an overlay of: base", out)
-        self.assertNotIn("would be started", out, "a started pool has nothing to start")
+        self.assertEqual(self._pool_start_lines(out), [], "a started pool has nothing to start")
 
     def test_a_dry_run_of_a_boot_deploy_defines_no_domain(self):
         """Even when everything it names is there, a dry run defines nothing."""
@@ -539,6 +539,16 @@ class TestDeployFromConfig(unittest.TestCase):
         """The label of every labelled line of a summary, in the order printed."""
         return [f"{line.split(':', 1)[0]}:" for line in out.splitlines() if ": " in line]
 
+    @staticmethod
+    def _pool_start_lines(out):
+        """The lines of a summary that say the pool would have to be started.
+
+        Named by what the line is about rather than by the words in it: a summary now
+        says what becomes of the machine too, and that sentence starts with the same
+        two words about a different thing.
+        """
+        return [line for line in out.splitlines() if "pool" in line.lower() and "would be" in line]
+
     def test_both_dry_run_summaries_share_their_labels_and_their_order(self):
         """The same thing is named with the same words, in the same place.
 
@@ -575,7 +585,7 @@ class TestDeployFromConfig(unittest.TestCase):
             self._boot_cfg(), present=["sidekick-worker01", "sidekick-worker01-seed"], active=True
         )
         self.assertIn("Storage Pool: default", out)
-        self.assertNotIn("would be started", out, "a started pool has nothing to start")
+        self.assertEqual(self._pool_start_lines(out), [], "a started pool has nothing to start")
 
         _result, out, *_rest = self._boot_dry_run(
             self._boot_cfg(storage_pool="sidekick"),
