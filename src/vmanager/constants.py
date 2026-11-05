@@ -742,7 +742,17 @@ Specify the NUMA nodes to use.
     CPUS_LABEL = _("CPUs")
     NONE_OPTION = _("None")
     REDIRECT_CONSOLE_SERIAL_LABEL = _("Redirect console to serial (ttyS0)")
-    # VM Provisioner Progress Messages
+    # VM Provisioner Progress Messages. Both deploy routes report from here: the words
+    # name the event, so a machine built from install media and a machine booted from a
+    # volume say the same thing while doing the same thing, and a caller watching one
+    # can read the other. A word only one route can report is added here too — starting
+    # a machine, or leaving it defined — because a second word for one event is worse
+    # than a word one route never says.
+    #
+    # These are passed through `_()` while the `stage` field beside them is not, and
+    # that is the seam decision 0001 in `docs/adr/` names and accepts: a `--machine`
+    # caller that needs a word to branch on reads `stage`, and the text here is the
+    # detail for whoever reads the log.
     PROVISIONING_CHECKING_ENVIRONMENT = _("Checking Environment")
     PROVISIONING_USING_EXISTING_ISO_VOLUME = _("Using existing ISO volume: {path}")
     PROVISIONING_USING_LOCAL_ISO_IMAGE = _("Using local ISO image")
@@ -751,10 +761,22 @@ Specify the NUMA nodes to use.
     PROVISIONING_SETTING_UP_UEFI_FIRMWARE = _("Setting up UEFI Firmware")
     PROVISIONING_CREATING_STORAGE = _("Creating Storage")
     PROVISIONING_GENERATING_AUTOMATION_CONFIG = _("Generating automation configuration")
+    PROVISIONING_UPLOADING_KERNEL_INITRD = _("Uploading kernel and initrd")
+    PROVISIONING_UPLOADING_AUTOMATION_IMAGE = _("Uploading automation floppy image")
+    PROVISIONING_ISO_ALREADY_EXISTS = _("ISO already exists")
     PROVISIONING_DEFINING_VM = _("Defining VM")
+    # The boot route defines, then starts, and reports the two separately. An install
+    # defines and starts in one step, so it has no event to report here — which is why
+    # this is a word of its own rather than a second name for a shared event.
+    PROVISIONING_STARTING_VM = _("Starting VM")
     PROVISIONING_COMPLETE_CONFIG_MODE = _("Provisioning Complete (Configuration Mode)")
     PROVISIONING_CONFIGURING_VM_XML = _("Configuring VM (XML)")
     PROVISIONING_COMPLETE = _("Provisioning Complete")
+    # The one ending only a boot gives: `start: false` leaves the machine defined and
+    # stopped, which an install cannot do, so it has no shared word to borrow. Whether
+    # the machine ended running is in the answer's `running` field, not a fact this line
+    # has to carry — and not the machine's name either, which is in `domain`.
+    PROVISIONING_COMPLETE_NOT_STARTED = _("Provisioning Complete (Defined, Not Started)")
 
     # VM Type constants
     VM_TYPE_SECURE = _("Secure VM")
