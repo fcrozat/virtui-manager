@@ -343,7 +343,7 @@ reboot
         return None
 
     def _substitute_variables(
-        self, content: str, config: Dict[str, Any], hash_fields: List[str] = None
+        self, content: str, config: Dict[str, Any], hash_fields: Optional[List[str]] = None
     ) -> str:
         """Generic variable substitution with optional password hashing."""
         substitutions = config.copy()

@@ -1397,9 +1397,13 @@ class InstallVMModal(BaseModal[Optional[str]]):
             self.app.call_from_thread(status_lbl.update, stage)
             self.app.call_from_thread(p_bar.update, progress=percent)
 
+        # Bound before the try: the except handler cleans this file up, and a
+        # failure on the first statement inside the try would leave it unbound
+        # and replace the real error with UnboundLocalError.
+        downloaded_iso_path = None  # Track downloaded file for cleanup
+
         try:
             final_iso_url = iso_url
-            downloaded_iso_path = None  # Track downloaded file for cleanup
 
             if custom_path:
                 # Check if ISO already exists in pool before downloading
