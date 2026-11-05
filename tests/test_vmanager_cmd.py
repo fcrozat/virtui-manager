@@ -1138,6 +1138,27 @@ class TestDeployFromConfig(unittest.TestCase):
                 self.assertEqual(install["graphics"], graphics)
                 self.assertEqual(boot["graphics"], graphics)
 
+    def test_the_disk_a_deploy_answers_is_the_size_the_file_asked_for(self):
+        """`disk_gb` is the file's own number, and a route without one answers none.
+
+        A deploy that took its size from the `vm_type` profile has a disk like any
+        other; what it has not got is a size the file named, and inventing the
+        provisioner's default in the answer would say the file had said it. A deploy
+        that boots a volume leaves the size out the same way and answers `volume`
+        instead: the disk it has is the one it was handed.
+        """
+        from_profile = json.loads(json.dumps(self._deploy_an_install(self._install_cfg())))
+        with_size = json.loads(
+            json.dumps(self._deploy_an_install(self._install_cfg(disk_size_gb=40)))
+        )
+        booting = json.loads(json.dumps(self._deploy_a_boot_volume(self._boot_cfg())))
+
+        self.assertNotIn("disk_gb", from_profile)
+        self.assertEqual(with_size["disk_gb"], 40)
+        self.assertNotIn("disk_gb", booting)
+        self.assertEqual(booting["volume"], "sidekick-worker01")
+        self.assertNotIn("volume", with_size)
+
     def test_the_answer_carries_the_profile_that_was_served(self):
         """A caller inspecting an install needs the URL the guest was told."""
         served = {

@@ -14,6 +14,14 @@ The stage a progress event carries is held to the same rule, for the same reason
 program branches on the word the way it branches on an exit status. The set in
 `MachineProgressStage` is what the commands emit, the manual lists that set, and no
 command may emit a stage the manual has never heard of.
+
+The table of what a `deploy` answers is held to the answer the code builds the same way,
+and for the same reason: a field a route answers that the table does not list is one a
+script cannot discover, and a field the table describes as something the code never
+answers is a branch that never fires. So the fields are read out of `_deploy_result` and
+the two deploy routes rather than restated here. What a command shows as its usage is
+held to the flags it reads for the same reason again, and no page may offer a caller a
+`--config` flag that `vmc` never took.
 """
 
 import ast
@@ -460,6 +468,241 @@ class ExitStatusTable(unittest.TestCase):
                     status,
                     documented,
                     f"a command answers status {status}, which the table does not list",
+                )
+
+
+# What a `deploy` answers is the contract a caller writes a script against, and the
+# answer is built by one function and added to by each of the two routes. The fields are
+# read out of those three rather than listed here: a list of them would be a second
+# thing to keep in step, and this guard exists because the manual's table had stopped
+# describing the code — it was missing a field one route answers, and described another
+# as a string when the route that answers it answers a word no deploy file may hold.
+DEPLOY_ANSWER_TABLE = "What a `deploy` answers"
+DEPLOY_ANSWER_BUILDER = "_deploy_result"
+DEPLOY_ROUTES = ("deploy_from_config", "_deploy_existing_volume")
+
+
+def _named_functions(source, names, where):
+    """The definitions of `names`, read out of a module's source."""
+    found = {
+        node.name: node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef) and node.name in names
+    }
+    missing = sorted(set(names) - set(found))
+    if missing:
+        raise AssertionError(
+            f"{where.relative_to(REPO)} no longer defines {', '.join(missing)}, so the guard "
+            "written against it reads nothing. Update the guard."
+        )
+    return found
+
+
+def _fields_written_by(function):
+    """The answer fields a function writes.
+
+    A field is written where it is put in the answer: a key of the dict literal the
+    answer is built from, or an `answer["field"] = ...` added on the way out.
+    """
+    fields = set()
+    for node in ast.walk(function):
+        if isinstance(node, ast.Dict):
+            fields |= {
+                key.value
+                for key in node.keys
+                if isinstance(key, ast.Constant) and isinstance(key.value, str)
+            }
+        elif (
+            isinstance(node, ast.Subscript)
+            and isinstance(node.ctx, ast.Store)
+            and isinstance(node.slice, ast.Constant)
+            and isinstance(node.slice.value, str)
+        ):
+            fields.add(node.slice.value)
+    return fields
+
+
+def _deploy_answers():
+    """{field: the routes that answer it}, read out of the command surface."""
+    functions = _named_functions(
+        VMANAGER_CMD.read_text(), {DEPLOY_ANSWER_BUILDER, *DEPLOY_ROUTES}, VMANAGER_CMD
+    )
+    shared = _fields_written_by(functions[DEPLOY_ANSWER_BUILDER])
+    answers = {field: set(DEPLOY_ROUTES) for field in shared}
+    for route in DEPLOY_ROUTES:
+        for field in _fields_written_by(functions[route]) - shared:
+            answers.setdefault(field, set()).add(route)
+    return answers
+
+
+def _documented_deploy_answers():
+    """{field: its row} from the manual's table of what a `deploy` answers."""
+    manual = CLI_MANUAL.read_text()
+    if DEPLOY_ANSWER_TABLE not in manual:
+        raise AssertionError(
+            f"{CLI_MANUAL.relative_to(REPO)} has no {DEPLOY_ANSWER_TABLE!r} section, so the "
+            "answer table this guard reads is gone. Put it back or update the guard."
+        )
+    section = manual.split(DEPLOY_ANSWER_TABLE, 1)[1].split("### Progress events")[0]
+    rows = {
+        _cells(line)[0].strip().strip("`").strip(): " ".join(_cells(line))
+        for line in section.splitlines()
+        if line.startswith("| `")
+    }
+    if not rows:
+        raise AssertionError(
+            f"the answer table in {CLI_MANUAL.relative_to(REPO)} has no rows to read."
+        )
+    return rows
+
+
+class DeployAnswerTable(unittest.TestCase):
+    """A row in the answer table is a field a deploy answers, and the other way round."""
+
+    def test_every_field_a_deploy_answers_has_a_row(self):
+        documented = _documented_deploy_answers()
+        for field in sorted(_deploy_answers()):
+            with self.subTest(field=field):
+                self.assertIn(
+                    field,
+                    documented,
+                    f"a deploy answers `{field}` and the table has no row for it, so a caller "
+                    f"reading {CLI_MANUAL.relative_to(REPO)} cannot know it is there",
+                )
+
+    def test_every_documented_field_is_answered(self):
+        answered = _deploy_answers()
+        for field in sorted(_documented_deploy_answers()):
+            with self.subTest(field=field):
+                self.assertIn(
+                    field,
+                    answered,
+                    f"the table promises `{field}`, which no deploy route answers: either a "
+                    "route has to answer it, or the row has to go",
+                )
+
+    def test_the_screen_row_says_the_answer_can_be_no_screen(self):
+        """A field whose answer may be `null` cannot be documented as a plain string.
+
+        `null` is how a deploy file asks for no screen, and it is what both routes
+        answer with. A row that promises a string sends a caller to branch on words, and
+        the word the summary uses for the same machine — `none` — is refused as a bad
+        `graphics` when it is written back into a file.
+        """
+        row = _documented_deploy_answers()["graphics"]
+        self.assertIn(
+            "null",
+            row,
+            "a deploy answers `null` for a machine with no screen, and the row for `graphics` "
+            "does not say so",
+        )
+
+
+# A flag a command reads is a flag its caller has to be told about, and a usage line is
+# where the CLI itself says what a command takes.
+FLAG_NAME = re.compile(r"^--[a-z][a-z-]*$")
+FLAG_IN_TEXT = re.compile(r"--[a-z][a-z-]*")
+
+
+def _handlers_reading_flags():
+    """{handler: (the flags it reads, the usage lines it shows)}, from the code."""
+    source = VMANAGER_CMD.read_text()
+    reading_flags = {
+        node.name
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.FunctionDef)
+        and node.name.startswith("do_")
+        and any(
+            isinstance(constant, ast.Constant)
+            and isinstance(constant.value, str)
+            and FLAG_NAME.match(constant.value)
+            for constant in ast.walk(node)
+        )
+    }
+    handlers = {}
+    for handler, function in sorted(_named_functions(source, reading_flags, VMANAGER_CMD).items()):
+        shown = [ast.get_docstring(function) or ""] + [
+            constant.value
+            for constant in ast.walk(function)
+            if isinstance(constant, ast.Constant)
+            and isinstance(constant.value, str)
+            and constant.value.lstrip().startswith("Usage:")
+        ]
+        handlers[handler] = (
+            {
+                constant.value
+                for constant in ast.walk(function)
+                if isinstance(constant, ast.Constant)
+                and isinstance(constant.value, str)
+                and FLAG_NAME.match(constant.value)
+            },
+            "\n".join(shown),
+        )
+    return handlers
+
+
+def _documented_signatures(command):
+    """The usage lines the manual writes for `command`, as it words them."""
+    forms = [
+        form
+        for line in CLI_MANUAL.read_text().splitlines()
+        for form in re.findall(r"`([^`]*)`", line)
+        if form.split()[:1] == [command] and len(form.split()) > 1
+    ]
+    if not forms:
+        raise AssertionError(
+            f"{CLI_MANUAL.relative_to(REPO)} documents no usage line for `{command}`."
+        )
+    return forms
+
+
+class CommandUsageLines(unittest.TestCase):
+    """The usage a command shows covers the flags the command reads."""
+
+    def test_every_flag_a_command_reads_is_in_the_usage_line_it_shows(self):
+        """Measured for every command that reads a flag, not the ones someone remembered.
+
+        `deploy_vm` read `--dryrun` and its alias `--show`, and both its own usage line
+        and the manual named one of the two.
+        """
+        for handler, (flags, shown) in sorted(_handlers_reading_flags().items()):
+            with self.subTest(command=handler):
+                self.assertFalse(
+                    flags - set(FLAG_IN_TEXT.findall(shown)),
+                    f"{handler} reads {', '.join(sorted(flags - set(FLAG_IN_TEXT.findall(shown))))} "
+                    "and neither its docstring nor the usage line it prints names them",
+                )
+
+    def test_the_documented_deploy_vm_usage_holds_both_spellings_of_a_dry_run(self):
+        """The manual's usage for `deploy_vm` says what the command takes, alias included."""
+        for form in _documented_signatures("deploy_vm"):
+            with self.subTest(usage=form):
+                self.assertEqual(
+                    set(FLAG_IN_TEXT.findall(form)),
+                    {"--dryrun", "--show"},
+                    "deploy_vm takes --show as another way of asking for --dryrun, so its "
+                    "usage line has to name both",
+                )
+
+
+class StaleFlagNames(unittest.TestCase):
+    """A flag `vmc` does not take must not survive where a caller would read it."""
+
+    def test_nothing_promises_a_vmc_config_flag(self):
+        """`-C/--json` is the flag that names a deployment file; `--config` never was.
+
+        Only a `--config` offered as `vmc`'s own is meant here: archinstall takes a
+        `--config` of its own, and that command line is quoted as it is run.
+        """
+        promised = re.compile(r"vmc[^\n]*--config(?![-\w])")
+        for path in sorted(SOURCE.rglob("*.py")) + [CLI_MANUAL]:
+            text = path.read_text()
+            with self.subTest(path=path.relative_to(REPO)):
+                self.assertNotRegex(
+                    text,
+                    promised,
+                    f"{path.relative_to(REPO)} offers a `--config` flag to a caller of vmc, "
+                    "and vmc has never taken one",
                 )
 
 
