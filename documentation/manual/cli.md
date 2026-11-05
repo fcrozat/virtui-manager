@@ -570,7 +570,7 @@ What a `deploy` answers, in `data`:
 | `memory_mb` | number | memory in megabytes. |
 | `vcpu` | number | virtual CPUs. |
 | `disk_gb` | number | the disk size the file asked for, in gigabytes. A deploy that took its size from the `vm_type` profile answers no `disk_gb`, and the machine is not diskless for all that: the number it got is the profile's. A deploy that boots a volume answers no `disk_gb` either, because the size belongs to the volume it was handed. |
-| `volume` | string | the disk this machine boots, when the deploy boots a volume the file names (`disk_volume`) instead of installing — an install makes its own disk and answers no `volume`. |
+| `volume` | string | the disk this machine boots, when the deploy boots the volume the file names (`disk.volume`) instead of installing — a deploy that installs makes its own disk and answers no `volume`. |
 | `automated_install` | boolean | whether an auto-install profile was generated. |
 | `seed` | string | the seed volume attached, when the file named one. |
 | `autoinstall` | object | where that profile is and the URL the guest was told to fetch it from: `directory`, `file`, `url`. Only there when one was generated, never an empty object. |
@@ -582,6 +582,20 @@ generated and nothing was served. The same three values are written to the log a
 info, so a run's log says what was served even when nobody was watching the
 terminal — which is the case for a caller whose install then failed, the moment
 the profile is most wanted.
+
+These are the two answers to two files naming one machine with `graphics` set to
+`null`, one booting `16-gnome.qcow2` and one installing from an ISO — dry runs on
+a live hypervisor, so nothing was changed and `running` is `false`:
+
+```json
+{"ok": true, "command": "deploy", "data": {"domain": "tt-x-probe", "server": "Local", "storage_pool": "fcrozat-images", "network": "default", "firmware": "uefi", "graphics": null, "memory_mb": 4096, "vcpu": 4, "automated_install": false, "dryrun": true, "running": false, "volume": "16-gnome.qcow2"}}
+{"ok": true, "command": "deploy", "data": {"domain": "tt-x-probe", "server": "Local", "storage_pool": "fcrozat-images", "network": "default", "firmware": "uefi", "graphics": null, "memory_mb": 4096, "vcpu": 4, "automated_install": false, "dryrun": true, "running": false}}
+```
+
+One `graphics` for one file, and the volume only on the route that was handed
+one. Both routes print `Graphics: none` in the summary above these lines: that
+line is prose, and the field a program reads back is `null` because `null` is
+what the file said.
 
 ### Progress events
 
