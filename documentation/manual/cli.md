@@ -363,10 +363,14 @@ for extra packages and SCC registration):
 
 `vm_type` selects a *profile* — `secure`, `computation`, `desktop`,
 `low_resource`, `wdesktop`, `wldesktop` or `server` — and the memory, disk and
-vCPU are taken from that profile (the same defaults the GUI uses), so you do
-not have to specify them. To set them manually, use `"vm_type": "custom"` and
-add `memory_mb`, `vcpu` and `disk_size_gb` (all required in that case). You may
-also add these fields to a profile to override its defaults.
+vCPU are taken from that profile, so you do not have to specify them. The memory
+and vCPU a profile means are written down once, in `VM_TYPE_DEFAULTS`
+(`src/vmanager/vm_provisioner.py`), and the interactive *Install VM* screen
+pre-fills its expert settings from that same table, so the two cannot drift
+apart; the disk size a profile gets is the neighbouring `DEFAULT_DISK_SIZE_GB`.
+To set them manually, use `"vm_type": "custom"` and add `memory_mb`, `vcpu` and
+`disk_size_gb` (all required in that case). You may also add these fields to a
+profile to override its defaults.
 
 The `iso.source` field can be `url`, `cached`, `pool` or `repository` (mirroring
 the ISO sources offered by `installvm`). `autoinstall.packages` adds extra

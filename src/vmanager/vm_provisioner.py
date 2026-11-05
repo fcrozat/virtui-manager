@@ -106,21 +106,33 @@ DEFAULT_DISK_SIZE_GB: Dict[VMType, int] = {
     VMType.COMPUTATION: 8,
 }
 
-# Per-profile resource defaults (memory in MiB, vCPU count), mirroring the GUI
-# expert defaults (ProvisioningModal._update_expert_defaults). Memory and vCPU
-# have no other reusable source; disk is intentionally left to DEFAULT_DISK_SIZE_GB
-# (provision_vm falls back to it when disk_size_gb is None), so there is a single
-# source of truth for disk size.
-# Used by the config-driven deploy path when a profile (not "custom") is chosen,
-# so memory/vCPU are taken from the profile instead of being asked each time.
+# What a profile means in hardware: memory in MiB and a vCPU count, one entry per
+# VMType. This is the only place those two numbers are written down, and both
+# routes that size a machine read them here - the config-driven deploy
+# (deploy_config.resolve_vm_resources, where a value in the deploy file wins) and
+# the interactive provisioning screen (InstallVMModal._update_expert_defaults,
+# which turns the memory back into the GB its expert input asks for).
+# tests/test_vm_type_profiles.py pins the two surfaces to each other.
+#
+# The numbers are the ones the screen offered before the two tables were joined:
+# the interactive tool defines a profile (maintainer's decision on issue #25).
+# That is a visible change for a deploy, not a refactor - a "server" profile now
+# starts a machine with 4 GB instead of 16, a "wldesktop" with 4 GB instead of 8.
+# Every other profile already agreed and is unchanged.
+#
+# Two facts about a profile stay in the screen, because only it asks them and
+# moving them here would silently change what a deploy creates: the disk format
+# (COMPUTATION is installed raw) and the firmware (COMPUTATION and WLDESKTOP boot
+# BIOS, and a deploy takes its boot mode from its own file). Disk size is the
+# table above, DEFAULT_DISK_SIZE_GB, which both routes already fall back to.
 VM_TYPE_DEFAULTS: Dict[VMType, Dict[str, int]] = {
     VMType.SECURE: {"memory_mb": 4096, "vcpu": 2},
     VMType.COMPUTATION: {"memory_mb": 8192, "vcpu": 4},
     VMType.DESKTOP: {"memory_mb": 4096, "vcpu": 4},
     VMType.LOW_RESOURCE: {"memory_mb": 512, "vcpu": 1},
     VMType.WDESKTOP: {"memory_mb": 16384, "vcpu": 8},
-    VMType.WLDESKTOP: {"memory_mb": 8192, "vcpu": 4},
-    VMType.SERVER: {"memory_mb": 16384, "vcpu": 6},
+    VMType.WLDESKTOP: {"memory_mb": 4096, "vcpu": 4},
+    VMType.SERVER: {"memory_mb": 4096, "vcpu": 6},
 }
 
 
