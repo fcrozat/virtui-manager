@@ -28,7 +28,6 @@ from email.utils import parsedate_to_datetime
 from enum import Enum
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
-from xml.sax.saxutils import escape
 
 import libvirt
 import yaml
@@ -48,6 +47,7 @@ from .utils import (
     get_ssh_host_from_uri,
     manage_firewalld_port,
     run_command,
+    xml_value,
 )
 from .vm_actions import delete_boot_files, get_vm_boot_files, strip_installation_assets
 
@@ -55,19 +55,6 @@ from .vm_actions import delete_boot_files, get_vm_boot_files, strip_installation
 # ours, so another tool's metadata sits beside it untouched.
 METADATA_NS = "https://virtui-manager/metadata/1"
 METADATA_ELEMENT = "properties"
-
-
-def xml_value(value) -> str:
-    """A path, name or setting made safe to put into domain XML.
-
-    These arrive from a deploy file and from the hypervisor: a pool directory may
-    hold a `&`, a network may be written with a quote, a download URL asked for by
-    an installer line may carry both. Escaped, libvirt is handed one value; left
-    alone, it is handed a document that does not parse and a failure that names the
-    hypervisor rather than the input. Both quote marks are escaped, so the result
-    is safe between tags and inside the single quotes this XML is written with.
-    """
-    return escape(str(value), {'"': "&quot;", "'": "&apos;"})
 
 
 def transfer_stalled(error: BaseException) -> bool:
@@ -1484,7 +1471,7 @@ class VMProvisioner:
         # Disk
         xml += f"""
     <disk type='file' device='disk'>
-      <driver name='qemu' type='{settings["disk_format"]}' cache='{settings["disk_cache"]}'/>
+      <driver name='qemu' type='{xml_value(settings["disk_format"])}' cache='{xml_value(settings["disk_cache"])}'/>
       <source file='{xml_value(disk_path)}'/>
       <target dev='vda' bus='{settings["disk_bus"]}'/>
       <boot order='{hd_boot}'/>
@@ -2681,7 +2668,7 @@ class VMProvisioner:
 
         xml += "  <devices>\n"
         xml += f"""    <disk type='file' device='disk'>
-      <driver name='qemu' type='{boot.disk_format}' cache='none'/>
+      <driver name='qemu' type='{xml_value(boot.disk_format)}' cache='none'/>
       <source file='{xml_value(boot.disk_path)}'/>
       <target dev='vda' bus='virtio'/>
       <boot order='{disk_boot}'/>

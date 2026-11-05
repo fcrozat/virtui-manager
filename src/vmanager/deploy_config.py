@@ -46,6 +46,14 @@ ISO_SOURCES = ("url", "pool", "cached", "repository")
 # attached (install media, or a seed a built machine is configured from).
 BOOT_DEVICES = ("disk", "cdrom")
 
+# The disk formats QEMU can open a machine's disk with, and so the ones a deploy
+# file may name. Spelled out here rather than left to the hypervisor: a format
+# that is not one of these is a bad deploy file, and the caller should be told so
+# before the disk is created and the seed placed, not refused by libvirt partway
+# through a deploy. It also keeps a value written with markup out of the domain
+# XML, where it would close the `driver` element it sits in.
+DISK_FORMATS = ("raw", "qcow2", "qcow", "vmdk", "vdi", "qed", "cow", "iso", "host_device")
+
 # The screens the tool can give a machine. Anything else in `graphics` is a typo
 # that would reach libvirt as a device it refuses, so it is answered here, as the
 # bad deploy file it is. `null` asks for no screen at all.
@@ -110,7 +118,7 @@ class MachinePlan:
     vm_type: VMType
 
     @classmethod
-    def of(cls, cfg, *, server_name, vm_name=None, automation_config=None) -> "MachinePlan":
+    def of(cls, cfg, *, server_name, vm_name=None, automation_config=None) -> MachinePlan:
         """The plan a validated config asks for, resources resolved.
 
         `vm_name` is given when the caller settled on a name the file does not
@@ -184,8 +192,15 @@ def _validate(cfg: Dict[str, Any]) -> None:
         cfg["memory_mb"] = _positive_int(cfg, "memory_mb", None)
         cfg["vcpu"] = _positive_int(cfg, "vcpu", None)
         cfg["disk_size_gb"] = _positive_int(cfg, "disk_size_gb", None)
-    if cfg.get("disk_format") is not None and not isinstance(cfg["disk_format"], str):
-        raise DeployConfigError("'disk_format' must be a string (e.g. 'qcow2')")
+    disk_format = cfg.get("disk_format")
+    if disk_format is not None:
+        if not isinstance(disk_format, str):
+            raise DeployConfigError("'disk_format' must be a string (e.g. 'qcow2')")
+        if disk_format not in DISK_FORMATS:
+            raise DeployConfigError(
+                f"'disk_format' must be one of {', '.join(DISK_FORMATS)} (got '{disk_format}')"
+            )
+    cfg["disk_format"] = disk_format
 
     # --- boot / graphics / network / pool defaults ---
     cfg["boot_uefi"] = bool(cfg.get("boot_uefi", True))

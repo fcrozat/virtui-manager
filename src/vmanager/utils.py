@@ -14,8 +14,27 @@ from functools import lru_cache, wraps
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple, Union
 from urllib.parse import urlparse
+from xml.sax.saxutils import escape
 
 from .constants import AppInfo
+
+
+def xml_value(value) -> str:
+    """A path, name or setting made safe to put into XML.
+
+    These arrive from a deploy file and from the hypervisor: a pool directory may
+    hold a `&`, a network may be written with a quote, a download URL asked for by
+    an installer line may carry both. Escaped, libvirt is handed one value; left
+    alone, it is handed a document that does not parse and a failure that names the
+    hypervisor rather than the input. Both quote marks are escaped, so the result
+    is safe between tags and inside the single quotes this XML is written with.
+
+    Lives here rather than in the provisioner because anything that writes XML for
+    the hypervisor needs it, and the automation engine cannot import the
+    provisioner: the provisioner imports the engine.
+    """
+    return escape(str(value), {'"': "&quot;", "'": "&apos;"})
+
 
 # Regex to match URIs with embedded credentials (user:password@host pattern)
 # Matches patterns like: qemu+ssh://user:password@host/system
