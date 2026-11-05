@@ -1117,6 +1117,48 @@ class TestDeployFromConfig(unittest.TestCase):
         answer = json.loads(json.dumps(result))
         self.assertIs(answer["running"], True)
 
+    def test_both_routes_answer_the_screen_the_file_asked_for(self):
+        """One file answers one `graphics`, whichever way the machine was made.
+
+        `null` is the only way a file asks for no screen, and it is the value both
+        routes hand the provisioner, so it is the value both answer with. A route
+        that spelled its own word there gave a caller two answers to one file, and
+        the word was not a word a file may hold: read back into a deploy file, it
+        is refused as a bad config.
+        """
+        for graphics in (None, "vnc", "spice"):
+            with self.subTest(graphics=graphics):
+                install = json.loads(
+                    json.dumps(self._deploy_an_install(self._install_cfg(graphics=graphics)))
+                )
+                boot = json.loads(
+                    json.dumps(self._deploy_a_boot_volume(self._boot_cfg(graphics=graphics)))
+                )
+
+                self.assertEqual(install["graphics"], graphics)
+                self.assertEqual(boot["graphics"], graphics)
+
+    def test_the_disk_a_deploy_answers_is_the_size_the_file_asked_for(self):
+        """`disk_gb` is the file's own number, and a route without one answers none.
+
+        A deploy that took its size from the `vm_type` profile has a disk like any
+        other; what it has not got is a size the file named, and inventing the
+        provisioner's default in the answer would say the file had said it. A deploy
+        that boots a volume leaves the size out the same way and answers `volume`
+        instead: the disk it has is the one it was handed.
+        """
+        from_profile = json.loads(json.dumps(self._deploy_an_install(self._install_cfg())))
+        with_size = json.loads(
+            json.dumps(self._deploy_an_install(self._install_cfg(disk_size_gb=40)))
+        )
+        booting = json.loads(json.dumps(self._deploy_a_boot_volume(self._boot_cfg())))
+
+        self.assertNotIn("disk_gb", from_profile)
+        self.assertEqual(with_size["disk_gb"], 40)
+        self.assertNotIn("disk_gb", booting)
+        self.assertEqual(booting["volume"], "sidekick-worker01")
+        self.assertNotIn("volume", with_size)
+
     def test_the_answer_carries_the_profile_that_was_served(self):
         """A caller inspecting an install needs the URL the guest was told."""
         served = {
@@ -1810,6 +1852,31 @@ class TestUriOption(unittest.TestCase):
         with patch("sys.stdout", MagicMock()), self.assertRaises(RuntimeError):
             self.cmd.deploy_from_config(cfg)
         self.assertEqual(calls, ["qemu:///system"])
+
+    def test_a_file_that_names_no_server_is_a_bad_file_even_with_a_uri(self):
+        """``-u`` replaces the file's server; it does not remove the requirement.
+
+        The file is checked the same way whether or not ``-u`` was given, so the same
+        bytes are not a bad file in one call and a good one in the next. Refusing it
+        is also what happens first: nothing is connected to on the way to telling the
+        caller their file is wrong.
+        """
+        cfg = self._write_cfg(
+            {
+                "vm_name": "v",
+                "vm_type": "server",
+                "iso": {"source": "url", "url": "http://h/SLE-15-SP1.iso"},
+            }
+        )
+        self.cmd.default_uri = "qemu:///system"
+        self.cmd._connect_one = MagicMock(return_value="local")
+
+        with patch("sys.stdout", MagicMock()), redirect_stdout(io.StringIO()) as out:
+            result = self.cmd.deploy_from_config(cfg)
+
+        self.assertIsNone(result, "a refused deployment answers with nothing deployed")
+        self.cmd._connect_one.assert_not_called()
+        self.assertIn("server", out.getvalue())
 
     def test_the_answer_names_the_hypervisor_the_override_used(self):
         """A caller can see the override took effect: `server` says where it went."""

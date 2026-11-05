@@ -1,5 +1,5 @@
 """
-Declarative deployment configuration for ``vmc --config``.
+Declarative deployment configuration for ``vmc -C/--json``.
 
 Loads and validates a JSON file that describes a *single* VM deployment. There
 are two shapes, and a file is one or the other:
@@ -99,10 +99,11 @@ class MachinePlan:
     file asked for. As one value a route can hand over the whole machine or
     nothing of it.
 
-    `graphics` is whatever the file said, verbatim: an install answers with it as
-    read, and the route that boots a volume says `"none"` where the file left the
-    screen out. `disk_size_gb` is None when the file named no size, which means
-    the provisioner's own default for the profile, not zero.
+    `graphics` is whatever the file said, verbatim, and both routes answer with it as
+    read: `null` is how a file asks for no screen, and `null` is what a caller gets,
+    because it is the one spelling a deploy file may hold. `disk_size_gb` is None
+    when the file named no size, which means the provisioner's own default for the
+    profile, not zero.
     """
 
     vm_name: str

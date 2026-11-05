@@ -299,7 +299,7 @@ runs fully non-interactively. This works for local and remote servers alike.
 
 *   **`prepare_json [output_path] [--init]`** (interactive, inside the CLI): walks you through the real decisions — probes the connected server for active networks, storage pools, cached/pool ISOs and the distribution ISO list, and lists the available auto-install templates — then writes a ready-to-run JSON file. Use `--init` to write an example skeleton without connecting to any server.
 *   **`vmc --json <file.json> [--dryrun]`** (outside the CLI): loads the JSON, connects to the server named in it and provisions the VM. `--dryrun` prints a summary of what would happen without provisioning anything.
-*   **`deploy_vm <file_or_name> [--dryrun]`** (interactive, inside the CLI): the in-shell equivalent of `vmc --json` — loads the JSON, connects to the server named in it and provisions the VM. `<file_or_name>` may be a full path or a bare filename looked up in `~/.config/virtui-manager/deploy/` (tab-completes the available files).
+*   **`deploy_vm <file_or_name> [--dryrun|--show]`** (interactive, inside the CLI): the in-shell equivalent of `vmc --json` — loads the JSON, connects to the server named in it and provisions the VM. `<file_or_name>` may be a full path or a bare filename looked up in `~/.config/virtui-manager/deploy/` (tab-completes the available files).
 
 The hypervisor a deploy goes to is the `server` field of the file, so a deploy
 needs no `-u/--uri`. That flag is how one file goes somewhere else: given `-u`,
@@ -489,7 +489,7 @@ the dry run already made.
 *   **`show_json <file>`** (inside the CLI): pretty-prints a deployment JSON
     file. `<file>` may be a full path or a bare filename looked up in the
     deploy directory (tab-completes the available files).
-*   **`deploy_vm <file_or_name> [--dryrun]`** (inside the CLI): deploys the VM
+*   **`deploy_vm <file_or_name> [--dryrun|--show]`** (inside the CLI): deploys the VM
     described by a deployment JSON file — the in-shell equivalent of
     `vmc --json`. `<file_or_name>` may be a full path or a bare filename looked
     up in the deploy directory (tab-completes the available files); the server
@@ -566,10 +566,11 @@ What a `deploy` answers, in `data`:
 | `storage_pool` | string | the pool its disk lives in. |
 | `network` | string | the network it is attached to. |
 | `firmware` | string | `uefi` or `bios`. |
-| `graphics` | string | the graphics device it was given. |
+| `graphics` | string or null | the screen the machine was given: `vnc` or `spice`, or `null` when the file asked for no screen by setting `graphics` to `null` — an absent `graphics` is not that, it means `spice`. It is the file's value read back, so an answer can be pasted into the next file; the word `none` is what a *summary* puts where there is no screen, and a file that holds it is refused as a bad `graphics`. |
 | `memory_mb` | number | memory in megabytes. |
 | `vcpu` | number | virtual CPUs. |
-| `disk_gb` | number | disk size, only when the file set one. |
+| `disk_gb` | number | the disk size the file asked for, in gigabytes. A deploy that took its size from the `vm_type` profile answers no `disk_gb`, and the machine is not diskless for all that: the number it got is the profile's. A deploy that boots a volume answers no `disk_gb` either, because the size belongs to the volume it was handed. |
+| `volume` | string | the disk this machine boots, when the deploy boots the volume the file names (`disk.volume`) instead of installing — a deploy that installs makes its own disk and answers no `volume`. |
 | `automated_install` | boolean | whether an auto-install profile was generated. |
 | `seed` | string | the seed volume attached, when the file named one. |
 | `autoinstall` | object | where that profile is and the URL the guest was told to fetch it from: `directory`, `file`, `url`. Only there when one was generated, never an empty object. |
@@ -581,6 +582,20 @@ generated and nothing was served. The same three values are written to the log a
 info, so a run's log says what was served even when nobody was watching the
 terminal — which is the case for a caller whose install then failed, the moment
 the profile is most wanted.
+
+These are the two answers to two files naming one machine with `graphics` set to
+`null`, one booting `16-gnome.qcow2` and one installing from an ISO — dry runs on
+a live hypervisor, so nothing was changed and `running` is `false`:
+
+```json
+{"ok": true, "command": "deploy", "data": {"domain": "tt-x-probe", "server": "Local", "storage_pool": "fcrozat-images", "network": "default", "firmware": "uefi", "graphics": null, "memory_mb": 4096, "vcpu": 4, "automated_install": false, "dryrun": true, "running": false, "volume": "16-gnome.qcow2"}}
+{"ok": true, "command": "deploy", "data": {"domain": "tt-x-probe", "server": "Local", "storage_pool": "fcrozat-images", "network": "default", "firmware": "uefi", "graphics": null, "memory_mb": 4096, "vcpu": 4, "automated_install": false, "dryrun": true, "running": false}}
+```
+
+One `graphics` for one file, and the volume only on the route that was handed
+one. Both routes print `Graphics: none` in the summary above these lines: that
+line is prose, and the field a program reads back is `null` because `null` is
+what the file said.
 
 ### Progress events
 
@@ -702,7 +717,13 @@ With `--json` the uri **takes precedence over** the `server` field of the
 deployment file: the file says what machine to build, `-u` says which
 hypervisor builds it, and one file can be deployed to as many of them as you
 like. Without `-u`, `--json` connects to the `server` of the file, and `-c` to
-the configured servers as before. The `server` of the answer is the hypervisor
+the configured servers as before.
+
+`-u` replaces the `server`, it does not remove the requirement: a file with no
+`server` is refused as a bad deployment file (status 3) even when `-u` names a
+hypervisor. Whether a file is a valid one is decided by its own bytes, not by
+the flags of the call that happens to read it, so the same file is not good in
+one call and rejected in the next. The `server` of the answer is the hypervisor
 the command actually used, so a caller can check the override took effect rather
 than take it on trust. A `-u` the hypervisor refuses is status 4. Like every other message, the uri is sanitized:
 credentials it carries are not repeated back.

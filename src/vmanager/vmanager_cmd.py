@@ -4585,14 +4585,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 )
                 return
 
-        graphics = None if str(cfg["graphics"]).lower() in ("", "none") else cfg["graphics"]
-        # The machine a boot deploys asks for is the file's, less two things the
-        # route answers its own way: a disk booted from a volume has no size of
-        # its own to report, and no screen is spelled `none` here.
+        # The machine a boot deploys asks for is the file's, less the one thing this
+        # route answers its own way: a disk booted from a volume has no size of its
+        # own to report. The screen is the file's, verbatim, as on the install route:
+        # `null` is how a file asks for no screen, and it is what the answer carries,
+        # because the word a summary puts there (`_graphics_word`) is prose for the
+        # person reading a terminal, and a value a program reads back has to be one
+        # the file could have held.
         plan = replace(
             MachinePlan.of(cfg, server_name=server_name, vm_name=vm_name),
             disk_size_gb=None,
-            graphics=graphics or "none",
         )
 
         # The words are DeploySummaryText's, and so is their place: what an install
@@ -4660,7 +4662,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 network_name=plan.network,
                 storage_pool_name=plan.storage_pool,
                 boot_uefi=plan.boot_uefi,
-                graphics=graphics,
+                graphics=plan.graphics,
                 boot_device=cfg["boot"],
                 metadata=cfg["metadata"],
                 start=cfg["start"],
@@ -5382,7 +5384,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     def do_deploy_vm(self, args):
         """Deploy a single VM from a deployment JSON file (see 'prepare_json').
 
-        Usage: deploy_vm <file_or_name> [--dryrun]
+        Usage: deploy_vm <file_or_name> [--dryrun|--show]
+
+        Options:
+          --dryrun   Show a summary of the deployment without provisioning.
+          --show     Show a summary of the deployment without provisioning.
 
         <file_or_name> may be a full path, or a filename looked up in the
         default deploy directory (~/.config/virtui-manager/deploy/).
@@ -5394,7 +5400,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         arg_list = [a for a in arg_list if a not in ("--dryrun", "--show")]
 
         if not arg_list:
-            print("Usage: deploy_vm <file_or_name> [--dryrun]")
+            print("Usage: deploy_vm <file_or_name> [--dryrun|--show]")
             print("Use 'list_json' to see available files.")
             return
 
@@ -5439,11 +5445,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 def _graphics_word(plan):
     """The screen a deploy gives the machine, in the one word both summaries use.
 
-    `graphics` is carried from the file verbatim, so a file that asks for no screen
-    leaves the install route holding a `None` and the route that boots a volume
-    holding the word `"none"` it was settled to. Both mean the domain gets no
-    graphics device, and a summary that printed one on a line where the other
-    printed the other would read as two different machines.
+    Both routes carry `graphics` from the file verbatim, so both hold a `None` for a
+    file that asks for no screen, and both answer it as `null`. The answer is a field
+    a program reads; this word is for the person reading a summary, and a line that
+    printed `None` on one route and `none` on the other would read as two different
+    machines.
     """
     return plan.graphics or DeploySummaryText.NO_SCREEN
 
@@ -5520,7 +5526,7 @@ def main():
             "Connect to this libvirt uri (qemu:///system, qemu+ssh://user@host/system) "
             "and to nothing else, instead of the servers marked autoconnect in the "
             "configuration; with --json, instead of the server field of the "
-            "deployment file"
+            "deployment file, which the file still has to name"
         ),
     )
     parser.add_argument(
