@@ -1206,6 +1206,110 @@ class TestDeployFromConfig(unittest.TestCase):
         _, kwargs = mock_prov.return_value.provision_vm.call_args
         self.assertEqual(kwargs["metadata"]["instance"], "worker01")
 
+    # A session remembers the list of machines and what it read about each one.
+    # A deploy that changed the hypervisor has to say so, as the resource commands
+    # do: a command run after it is answered from those caches, and a machine the
+    # deploy added is not in a list that was made before it.
+
+    def test_an_install_forgets_the_list_of_machines(self):
+        """A machine installed is one more machine, and only that clearing says so."""
+        self._deploy_an_install(self._install_cfg())
+
+        self.mock_vm_service.invalidate_domain_cache.assert_called_once()
+
+    def test_a_boot_deploy_forgets_the_list_of_machines(self):
+        """The route that boots a volume adds a machine just the same."""
+        self._deploy_a_boot_volume(self._boot_cfg())
+
+        self.mock_vm_service.invalidate_domain_cache.assert_called_once()
+
+    def test_a_deploy_forgets_the_state_remembered_of_the_machine(self):
+        """The machine's own state is forgotten by its identity, as the resource
+        commands forget it, so an action taken next reads the hypervisor."""
+        self._deploy_an_install(self._install_cfg())
+
+        identity_of_the_machine = self.mock_vm_service.get_vm_identity.return_value[0]
+        self.mock_vm_service.invalidate_vm_state_cache.assert_called_once_with(
+            identity_of_the_machine
+        )
+
+    def test_a_refused_deploy_forgets_nothing(self):
+        """A name already taken changed no hypervisor, so the caches keep what they hold."""
+        conn = MagicMock()
+        conn.lookupByName.return_value = MagicMock()  # the name is taken
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+
+        with patch("vmanager.vmanager_cmd.VMProvisioner"), redirect_stdout(io.StringIO()) as buf:
+            self.assertIsNone(self.cmd.deploy_from_config(self._install_cfg()))
+
+        self.assertIn("already exists", buf.getvalue())
+        self._nothing_forgotten()
+
+    def test_a_failed_install_forgets_nothing(self):
+        """Emptying the caches for a machine that was never made costs the next
+        command a round trip for nothing."""
+        from vmanager.machine_mode import MachineError, MachineSession
+
+        conn = MagicMock()
+        conn.lookupByName.side_effect = self._no_domain_error()
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+
+        with (
+            patch("vmanager.vmanager_cmd.ensure_default_pool", return_value=True),
+            patch("vmanager.vmanager_cmd.ensure_default_network"),
+            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov,
+            patch("vmanager.vmanager_cmd.list_storage_pools"),
+            patch("vmanager.vmanager_cmd.list_networks"),
+            patch("sys.stdout", MagicMock()),
+            redirect_stdout(io.StringIO()),
+        ):
+            mock_prov.return_value.provision_vm.side_effect = RuntimeError("no space left")
+            with self.assertRaises(MachineError):
+                self.cmd.deploy_from_config(self._install_cfg(), session=MachineSession("deploy"))
+
+        self._nothing_forgotten()
+
+    def test_a_failed_boot_deploy_forgets_nothing(self):
+        """The other route refused to make the machine, and has nothing to forget."""
+        from vmanager.machine_mode import MachineError, MachineSession
+
+        conn = MagicMock()
+        conn.lookupByName.side_effect = self._no_domain_error()
+        self.cmd.active_connections["local"] = conn
+        self.cmd._connect_one = MagicMock(return_value="local")
+        conn.storagePoolLookupByName.return_value = self._pool_with(
+            "sidekick-worker01", "sidekick-worker01-seed"
+        )
+
+        with (
+            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov,
+            patch("sys.stdout", MagicMock()),
+            redirect_stdout(io.StringIO()),
+        ):
+            mock_prov.return_value.provision_existing_volume.side_effect = RuntimeError(
+                "the hypervisor refused"
+            )
+            with self.assertRaises(MachineError):
+                self.cmd.deploy_from_config(self._boot_cfg(), session=MachineSession("deploy"))
+
+        self._nothing_forgotten()
+
+    def test_a_dry_run_forgets_nothing(self):
+        """A dry run changes no hypervisor, on either route, so it invalidates neither
+        the list nor the state."""
+        volumes = ["sidekick-worker01", "sidekick-worker01-seed"]
+        self._deploy_an_install(self._install_cfg(), dryrun=True)
+        self._boot_dry_run(self._boot_cfg(), present=volumes)
+
+        self._nothing_forgotten()
+
+    def _nothing_forgotten(self):
+        """Neither of the two clearings a deploy does was asked for."""
+        self.mock_vm_service.invalidate_domain_cache.assert_not_called()
+        self.mock_vm_service.invalidate_vm_state_cache.assert_not_called()
+
     def test_deploy_vm_no_args_shows_usage(self):
         with redirect_stdout(io.StringIO()) as buf:
             self.cmd.do_deploy_vm("")
