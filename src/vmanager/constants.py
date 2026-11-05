@@ -1379,10 +1379,10 @@ class VMDetailConstants:  # pylint: disable=too-few-public-methods
 class MachineModeText:  # pylint: disable=too-few-public-methods
     """The words a machine caller is answered with when its command is wrong.
 
-    Deliberately not passed through `_()`: these strings belong to a contract a
-    program reads, and translating them would change what the answer says while
-    the exit status stayed the same. The `code` beside them is the stable part;
-    this is the part written for the human reading the log afterwards.
+    Deliberately not passed through `_()`, for the reason recorded in
+    ``docs/adr/0001-machine-answers-are-not-localized.md``. The `code` beside
+    these is the stable part; this is the part written for the human reading the
+    log afterwards.
     """
 
     EMPTY_COMMAND = "Empty command."
@@ -1427,8 +1427,9 @@ class MachineProgressStage:  # pylint: disable=too-few-public-methods
 class MachineResourceText:  # pylint: disable=too-few-public-methods
     """What the resource commands of ``vmc --machine`` answer when told wrongly.
 
-    Not passed through `_()`, for the reason given on `MachineModeText`: a program
-    reads these, and the `code` field beside them is the part that must not vary.
+    Not passed through `_()`, for the reason in decision 0001 in ``docs/adr/``:
+    a program reads these, and the `code` field beside them is the part that must
+    not vary.
     Names of things — a pool, a volume, a flag — arrive as `{name}` so the sentence
     stays here and the vocabulary of the command does not leak into it.
     """
@@ -1495,9 +1496,8 @@ class DeployText:  # pylint: disable=too-few-public-methods
     answer — so they are the awkward middle: they read like prose because they are
     read by a person, and they are a contract because a program logs the same words
     beside the ``code`` it branches on. The machine half picks the class, and with
-    it the rule that they are not passed through `_()`, for the reason given on
-    `MachineModeText`: a translated answer would say something different while the
-    exit status went on saying the same thing.
+    it the rule that they are not passed through `_()` — decision 0001 in
+    ``docs/adr/``.
 
     Names come out of the deploy file, so they arrive as placeholders and the
     sentence stays here. `checks/check_constants.py` reports any deploy failure
