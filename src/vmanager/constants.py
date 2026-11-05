@@ -1393,6 +1393,37 @@ class MachineModeText:  # pylint: disable=too-few-public-methods
     NO_SUCH_FLAG_TEMPLATE = "machine info has no {flag} flag."
 
 
+class MachineProgressStage:  # pylint: disable=too-few-public-methods
+    """The stage a ``--machine`` progress event names, and the only set of them.
+
+    A caller branches on these words the way it branches on an exit status, so they
+    are part of a contract rather than prose: not passed through `_()`, and not
+    reworded once a script depends on them. Every command takes its stage from here,
+    and ``documentation/manual/cli.md`` lists the same words in its Progress events
+    section — ``tests/test_cli_docs.py`` fails if the manual, this set, or a command
+    drifts apart, because a stage emitted and not documented leaves a caller
+    branching on a word it was never told about.
+    """
+
+    # The two routes a deploy takes, one word for each.
+    INSTALL = "install"  # a machine built from install media
+    BOOT = "boot"  # a machine booted from a volume the pool already holds
+
+    # The bytes of `volume upload`, reported as they go into the pool.
+    UPLOAD = "upload"
+
+    # A domain action reports the action's own word, because that is the word the
+    # caller of `domain start` already branches on. `undefine` is not one of them:
+    # the machine it removes has nothing left to report afterwards.
+    START = "start"
+    SHUTDOWN = "shutdown"
+    REBOOT = "reboot"
+    DESTROY = "destroy"
+
+    # The whole set, which is what the manual lists.
+    ALL = frozenset({INSTALL, BOOT, UPLOAD, START, SHUTDOWN, REBOOT, DESTROY})
+
+
 class MachineResourceText:  # pylint: disable=too-few-public-methods
     """What the resource commands of ``vmc --machine`` answer when told wrongly.
 
