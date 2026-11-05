@@ -13,6 +13,7 @@ answers with ``EXIT_UNSUPPORTED`` rather than an empty success.
 
 import json
 import shlex
+import socket
 import sys
 
 from .constants import AppInfo, MachineModeText
@@ -33,11 +34,16 @@ EXIT_OPERATION = 7  # the hypervisor refused, or the operation failed
 EXIT_TIMEOUT = 8  # a wait ran out
 EXIT_UNSUPPORTED = 9  # command has no machine-readable result (older vmc)
 
-# The stage a progress event names, so a caller can group events without
-# reading prose. The ``message`` carries the detail; the stage says which part
-# of a long command is talking. Documented in documentation/manual/cli.md.
-STAGE_INSTALL = "install"  # deploying a machine from install media
-STAGE_BOOT = "boot"  # deploying a machine from a volume the pool holds
+# The exceptions that say a wait ran out. ``socket.timeout`` is an alias of
+# ``TimeoutError`` only from Python 3.10: on the 3.9 this project still supports
+# the two are separate ``OSError`` siblings, so a timeout is named as both,
+# otherwise a stalled transfer is mistaken for a generic failure there.
+TIMEOUT_ERRORS = (TimeoutError, socket.timeout)
+
+# The stage a progress event names is one of ``MachineProgressStage``, held with
+# the rest of the words a machine caller is answered with, and listed by
+# documentation/manual/cli.md. A command takes the stage it reports from there, so
+# the set cannot grow quietly behind the manual.
 
 
 class MachineError(Exception):
@@ -57,7 +63,7 @@ def status_for_exception(error):
     """
     if isinstance(error, MachineError):
         return error.status, error.code
-    if isinstance(error, TimeoutError):
+    if isinstance(error, TIMEOUT_ERRORS):
         return EXIT_TIMEOUT, "timeout"
     if type(error).__name__ == "libvirtError":
         return EXIT_OPERATION, "libvirt_error"
@@ -83,7 +89,12 @@ class MachineSession:
         self._stream.flush()
 
     def progress(self, stage, message, percent=None):
-        """Report what a long command is doing, while it does it."""
+        """Report what a long command is doing, while it does it.
+
+        ``stage`` says which part of the command is talking — one of
+        ``MachineProgressStage.ALL`` — and ``message`` is the detail for whoever is
+        reading it.
+        """
         event = {"event": "progress", "stage": stage, "message": message}
         if percent is not None:
             event["percent"] = percent
