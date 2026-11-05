@@ -37,7 +37,9 @@ from .machine_mode import (
     EXIT_NOT_FOUND,
     EXIT_OK,
     EXIT_OPERATION,
+    EXIT_TIMEOUT,
     EXIT_USAGE,
+    TIMEOUT_ERRORS,
     MachineError,
     MachineSession,
     run_command,
@@ -4382,6 +4384,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         except MachineError:
             # Already a failure with its own status; do not re-wrap it.
             raise
+        except TIMEOUT_ERRORS as e:
+            # Media that stopped answering is not a hypervisor that refused: the
+            # wait that ran out keeps the status the caller switches on.
+            self._deploy_fail(str(e), EXIT_TIMEOUT, "timeout")
         except Exception as e:
             self._deploy_fail(f"Failed to provision VM: {e}", EXIT_OPERATION, "provision_failed")
 

@@ -13,6 +13,7 @@ answers with ``EXIT_UNSUPPORTED`` rather than an empty success.
 
 import json
 import shlex
+import socket
 import sys
 
 from .constants import AppInfo, MachineModeText
@@ -32,6 +33,12 @@ EXIT_EXISTS = 6  # the name is taken
 EXIT_OPERATION = 7  # the hypervisor refused, or the operation failed
 EXIT_TIMEOUT = 8  # a wait ran out
 EXIT_UNSUPPORTED = 9  # command has no machine-readable result (older vmc)
+
+# The exceptions that say a wait ran out. ``socket.timeout`` is an alias of
+# ``TimeoutError`` only from Python 3.10: on the 3.9 this project still supports
+# the two are separate ``OSError`` siblings, so a timeout is named as both,
+# otherwise a stalled transfer is mistaken for a generic failure there.
+TIMEOUT_ERRORS = (TimeoutError, socket.timeout)
 
 # The stage a progress event names is one of ``MachineProgressStage``, held with
 # the rest of the words a machine caller is answered with, and listed by
@@ -56,7 +63,7 @@ def status_for_exception(error):
     """
     if isinstance(error, MachineError):
         return error.status, error.code
-    if isinstance(error, TimeoutError):
+    if isinstance(error, TIMEOUT_ERRORS):
         return EXIT_TIMEOUT, "timeout"
     if type(error).__name__ == "libvirtError":
         return EXIT_OPERATION, "libvirt_error"

@@ -21,6 +21,7 @@ import re
 import unittest
 from pathlib import Path
 
+from vmanager import machine_mode
 from vmanager.constants import MachineProgressStage
 from vmanager.machine_mode import MACHINE_COMMANDS
 from vmanager.machine_resources import OPTIONS, SUBJECT_WRITTEN_AFTER
@@ -28,6 +29,7 @@ from vmanager.machine_resources import OPTIONS, SUBJECT_WRITTEN_AFTER
 REPO = Path(__file__).resolve().parents[1]
 CLI_MANUAL = REPO / "documentation" / "manual" / "cli.md"
 VMANAGER_CMD = REPO / "src" / "vmanager" / "vmanager_cmd.py"
+MACHINE_RESOURCES = REPO / "src" / "vmanager" / "machine_resources.py"
 SOURCE = REPO / "src"
 
 # The one machine command not in OPTIONS: it answers what this vmc is without a
@@ -404,6 +406,60 @@ class ProgressStageList(unittest.TestCase):
                     emitted,
                     f"the set in {CONSTANTS_SOURCE} holds '{stage}', but no command emits it: the "
                     "set is what the commands emit, not what they might.",
+                )
+
+
+def _documented_exit_statuses():
+    """The exit statuses the manual promises a caller, as written."""
+    section = CLI_MANUAL.read_text().split("### Exit statuses")[1].split("\n## ")[0]
+    statuses = set()
+    for line in section.splitlines():
+        cells = _cells(line)
+        if cells and cells[0].strip().isdigit():
+            statuses.add(int(cells[0].strip()))
+    return statuses
+
+
+def _statuses_a_command_answers():
+    """The statuses the command surface names as its answer, read out of the code.
+
+    A status is named where a command decides it, which is how it reaches a
+    caller; the constants an import merely carries along are not decisions, so
+    the code is walked for the names rather than searched as text.
+    """
+    answers = {
+        name: value for name, value in vars(machine_mode).items() if name.startswith("EXIT_")
+    }
+    decided = set()
+    for module in (VMANAGER_CMD, MACHINE_RESOURCES):
+        for node in ast.walk(ast.parse(module.read_text())):
+            if isinstance(node, ast.Name) and node.id in answers:
+                decided.add(answers[node.id])
+    return decided
+
+
+class ExitStatusTable(unittest.TestCase):
+    """A status row is a promise that some command can actually answer it."""
+
+    def test_every_documented_status_is_answered_by_a_command(self):
+        decided = _statuses_a_command_answers()
+        for status in sorted(_documented_exit_statuses()):
+            with self.subTest(status=status):
+                self.assertIn(
+                    status,
+                    decided,
+                    f"status {status} is documented but no command answers with it: "
+                    "either a command has to reach it, or the row has to go",
+                )
+
+    def test_every_status_a_command_answers_is_documented(self):
+        documented = _documented_exit_statuses()
+        for status in sorted(_statuses_a_command_answers()):
+            with self.subTest(status=status):
+                self.assertIn(
+                    status,
+                    documented,
+                    f"a command answers status {status}, which the table does not list",
                 )
 
 
