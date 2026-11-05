@@ -9,6 +9,11 @@ that is not 0.
 
 ``data`` payloads are added command by command, and a command without one
 answers with ``EXIT_UNSUPPORTED`` rather than an empty success.
+
+This surface departs from the interactive tool in three places, deliberately, and
+each is recorded in ``documentation/architecture/decisions/``: the answers are not
+localized (0001), state is read from the hypervisor rather than the cache (0002),
+and ``volume rename`` answers 9 (0003).
 """
 
 import json

@@ -53,16 +53,14 @@ POOL_PARENT = "/var/lib/libvirt"
 # The words of a domain's state, as a caller switches on them. libvirt numbers
 # them; the names are what a program compares, and what `vmc` prints.
 #
-# This is the one reading the machine surface does not share with the
-# interactive one, and it is worth saying why. `vm_queries.get_status` answers the
-# words a person reads — `StatusText.RUNNING`, which is localized and could be
-# reworded some Tuesday without breaking anything. A program compares `running`,
-# and a word it compares is a word that must not move, so the number is turned
-# into a name here instead. What is read is the same: `domain.info()`, the call
-# `get_status` makes when it is not handed the state. The interactive tool reads
-# it through the caches of `vm_service`, which is what keeps its list from
-# freezing; a scripted caller asks once and wants the hypervisor's now, so these
-# commands ask the hypervisor.
+# This is the one reading the machine surface does not share with the interactive
+# one: the interactive tool answers from the caches of `vm_service`, these commands
+# ask the hypervisor. Why, and what would make it wrong, is recorded in
+# documentation/architecture/decisions/0002-machine-commands-read-the-hypervisor-directly.md.
+# The names come from here rather than from `vm_queries.get_status`, which answers
+# the localized words a person reads, for the reason in decision 0001: a program
+# compares `running`, and a word it compares must not move. What is read is the
+# same call either way — `domain.info()`.
 STATE_NAMES = {
     libvirt.VIR_DOMAIN_NOSTATE: "nostate",
     libvirt.VIR_DOMAIN_RUNNING: "running",
@@ -493,13 +491,10 @@ def _volume_command(app, args, session):
         return {"name": name}
 
     if subcommand == "rename":
-        # There is nothing to call. libvirt has `virStorageVolRename`, and the
-        # Python binding does not wrap it: `virStorageVol` answers to `upload`,
-        # `download`, `delete`, `resize` and `wipe`, and not to `rename`. The
-        # command was calling a method of that name all along, and the
-        # AttributeError was swallowed as an unknown error, so a caller asking
-        # politely was told nothing useful. Saying it cannot be done, and where
-        # it can, is the whole of the honest answer.
+        # There is nothing to call: the Python binding does not wrap
+        # `virStorageVolRename`, so this refuses and names the tool that can do it.
+        # Why status 9, and why not a copy or a `virsh` call, is recorded in
+        # documentation/architecture/decisions/0003-renaming-a-volume-answers-status-9.md.
         raise MachineError(
             MachineResourceText.VOLUME_RENAME_IS_NOT_POSSIBLE, EXIT_UNSUPPORTED, "unsupported"
         )
