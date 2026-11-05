@@ -769,6 +769,22 @@ def _machine_changed(app, domain, gone=False):
         service.invalidate_domain_cache()
 
 
+def machine_created(app, domain):
+    """Forget the list of machines, as well as what was remembered about this one.
+
+    A deploy adds a machine, so it is the list that answers stale afterwards: a
+    caller asking what the hypervisor has is answered from before the machine it
+    made. The state of the machine itself has nothing remembered yet, and is
+    dropped anyway, so an action taken next reads the hypervisor and not the
+    moment the deploy saw on its way out.
+    """
+    _machine_changed(app, domain)
+    service = getattr(app, "vm_service", None)
+    if service is not None:
+        # A machine there was not before is a bigger list of them.
+        service.invalidate_domain_cache()
+
+
 def _volumes_changed():
     """Forget the volumes of a pool, and the pools themselves.
 
