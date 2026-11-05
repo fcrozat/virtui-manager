@@ -8,6 +8,7 @@ import logging
 import os
 import subprocess
 from pathlib import Path
+from typing import Optional
 
 import libvirt
 from textual import on, work
@@ -29,7 +30,6 @@ from .template_modals import TemplateManagementModal
 from .utils_modals import FileSelectionModal
 from .vm_type_info_modal import VMTypeInfoModal
 from .vmdetails_modals import VMDetailModal
-from typing import Optional
 
 
 class InstallVMModal(BaseModal[Optional[str]]):

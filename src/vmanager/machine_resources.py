@@ -292,12 +292,6 @@ def _domain_state(domain):
         return "missing"
 
 
-def volume_path_and_format(vol):
-    """Where a volume's bytes are, and how they are formatted (`qcow2`, `raw`)."""
-    facts = volume_facts(vol)
-    return facts["path"], facts["format"]
-
-
 def _volume_entry(vol):
     """A volume as this protocol answers it: the facts, in megabytes."""
     facts = volume_facts(vol)
@@ -896,14 +890,15 @@ def _host_command(app, args, _session):
 
     if subcommand == "capabilities":
         resources = _node_information(conn)
+        architectures, uefi = _capabilities(conn)
         return {
             "hostname": _hostname(conn),
             # What can run here: every architecture the hypervisor has guests for.
-            "architectures": _guest_architectures(conn),
+            "architectures": architectures,
             "host_cpus": resources["host_cpus"],
             "memory_mb": resources["memory_mb"],
             # UEFI is not assumed anywhere: a caller asks for it and reads this.
-            "uefi": _has_uefi_firmware(conn),
+            "uefi": uefi,
         }
 
     if subcommand == "resources":
@@ -928,33 +923,36 @@ def _node_information(conn):
     }
 
 
-def _guest_architectures(conn):
-    """The architectures this hypervisor can run, from its host capabilities."""
+def _capabilities(conn):
+    """What the hypervisor's capabilities document says about the machines it can run.
+
+    One read answers the two questions `host capabilities` asks: every
+    architecture it has guests for, and whether a UEFI guest can boot here. They
+    were asked separately, each reading and parsing the same document for itself,
+    so the command paid for it twice and kept two ideas of what a document it
+    cannot read means. A hypervisor that will not answer, or answers with
+    something that is not the document, is answered as each question answered on
+    its own: no architecture, no UEFI.
+
+    The two answers stay different from each other: a document naming
+    architectures with no UEFI loader in it names the architectures and says
+    `false` for UEFI.
+    """
     try:
         root = ET.fromstring(conn.getCapabilities())
     except (libvirt.libvirtError, ET.ParseError, TypeError):
-        return []
-    found = []
-    for guest in root.findall("guest"):
-        architecture = guest.find("arch")
-        if architecture is not None:
-            name = architecture.get("name")
-            if name and name not in found:
-                found.append(name)
-    return found
+        return [], False
 
-
-def _has_uefi_firmware(conn):
-    """Whether a UEFI guest can boot here, which is what `firmware:uefi` asks."""
-    try:
-        root = ET.fromstring(conn.getCapabilities())
-    except (libvirt.libvirtError, ET.ParseError, TypeError):
-        return False
+    architectures = []
+    uefi = False
     for guest in root.findall("guest"):
         architecture = guest.find("arch")
         if architecture is None:
             continue
+        name = architecture.get("name")
+        if name and name not in architectures:
+            architectures.append(name)
         for loader in architecture.findall("loader"):
             if (loader.get("type") or "pflash") == "pflash":
-                return True
-    return False
+                uefi = True
+    return architectures, uefi

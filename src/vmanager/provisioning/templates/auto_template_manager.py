@@ -341,8 +341,6 @@ class AutoYaSTTemplateManager:
                 f.write(content)
 
             meta_file = template_path.with_suffix(template_path.suffix + ".meta")
-            import json
-
             meta_data = {
                 "name": name,
                 "description": description,

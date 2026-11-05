@@ -713,6 +713,41 @@ class NetworkAndHostTest(unittest.TestCase):
         result = answer(self.conn, "host capabilities")
         self.assertFalse(result["uefi"])
 
+    def test_the_architectures_are_named_once_from_every_guest(self):
+        """One guest per architecture is how a hypervisor describes them, so the list
+        is the architectures, not the guests; a loader that does not say what kind it
+        is, is the kind a UEFI guest boots from."""
+        self.conn.capabilities = (
+            "<capabilities>"
+            "<guest><arch name='x86_64'>"
+            "<loader>/usr/share/OVMF/OVMF_CODE.fd</loader>"
+            "</arch></guest>"
+            "<guest><arch name='x86_64'><machine>q35</machine></arch></guest>"
+            "<guest><arch name='aarch64'/></guest>"
+            "</capabilities>"
+        )
+        result = answer(self.conn, "host capabilities")
+        self.assertEqual(result["architectures"], ["x86_64", "aarch64"])
+        self.assertTrue(result["uefi"])
+
+    def test_capabilities_a_hypervisor_cannot_answer_are_still_an_answer(self):
+        """A hypervisor that refuses, answers with nothing, or answers with half a
+        document is not a failed command: what can run here is nothing, and UEFI is not
+        available. Both questions used to be read out of the document twice, and each
+        read decided on its own what it could not read meant; they now decide once, and
+        the answer is what each of them said alone.
+        """
+
+        def refuses():
+            raise libvirt.libvirtError("capabilities not available")
+
+        for unable in (refuses, lambda: None, lambda: "<capabilities><guest>"):
+            with self.subTest(unable=unable):
+                self.conn.getCapabilities = unable
+                result = answer(self.conn, "host capabilities")
+                self.assertEqual(result["architectures"], [])
+                self.assertFalse(result["uefi"])
+
     def test_resources(self):
         result = answer(self.conn, "host resources")
         self.assertEqual(result["memory_mb"], 32768)

@@ -5,6 +5,7 @@ Library for VM creation and provisioning, supporting multiple Linux distribution
 from __future__ import annotations
 
 import base64
+import glob
 import hashlib
 import json
 import logging
@@ -34,7 +35,7 @@ import yaml
 
 from .auto_http_server import AutoHTTPServer, RemoteAutoHTTPServer
 from .config import load_config
-from .constants import AppInfo, StaticText
+from .constants import AppInfo, ErrorMessages, StaticText
 from .firmware_manager import get_uefi_files, select_best_firmware
 from .libvirt_utils import get_host_architecture, get_latest_machine_types
 from .machine_mode import TIMEOUT_ERRORS
@@ -425,8 +426,6 @@ class VMProvisioner:
         Returns:
             Path to the downloaded ISO file.
         """
-        from .constants import ErrorMessages
-
         # Validate URL
         if not url.startswith(("http://", "https://")):
             raise ValueError(ErrorMessages.CUSTOM_ISO_INVALID_URL_TEMPLATE.format(url=url))
@@ -3759,8 +3758,6 @@ class VMProvisioner:
         These are created by _extract_*_iso_kernel_initrd methods and should be
         cleaned up after the kernel/initrd files have been uploaded to storage.
         """
-        import glob
-
         temp_patterns = [
             "/tmp/virtui_iso_extract_*",
             "/tmp/virtui_debian_iso_extract_*",
