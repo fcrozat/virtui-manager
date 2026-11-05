@@ -465,6 +465,22 @@ it and does not refuse a deploy for a volume it was never allowed to see; a
 volume a started pool does not have is still the deploy that cannot happen, and
 is answered 5 as it is without `--dryrun`.
 
+Both routes print the same summary, so a line means the same thing whichever
+machine you asked about and sits in the same place: `VM Name`, `Server`, the
+hardware (`Memory: 2048 MB, vCPU: 2`), what the machine boots from, `Seed CD-ROM`
+when it has one, `Network`, `Storage Pool`, `Boot Mode`, `Graphics` — `none` for a
+file that asked for no screen — and last whether the machine would be started once
+it is defined or left stopped, which is the file's `start`. Each route then adds
+what only it can answer: an install names the `VM Type` profile, the `ISO`, the
+size it would give the disk, and what the automated install would be fed; a machine
+booted from a volume names the volume, says whether it would be made as an overlay
+of a base, and names the `Boot order` the firmware would try — but no disk size,
+because the disk it boots already exists and the size in the file is ignored.
+Anything the deploy would *do*, rather than what the machine would *be*, is written
+as what would happen — `Storage pool: default would be started`,
+`would be made as an overlay of: base` — so a summary cannot be misread as a change
+the dry run already made.
+
 ### Managing deployment JSON files
 
 *   **`list_json`** (inside the CLI): lists all deployment JSON files you have

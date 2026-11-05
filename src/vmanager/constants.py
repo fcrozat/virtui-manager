@@ -1531,6 +1531,99 @@ class DeployText:  # pylint: disable=too-few-public-methods
     BOOT_FAILED_TEMPLATE = "Failed to boot the machine: {error}"
 
 
+class DeploySummaryText:  # pylint: disable=too-few-public-methods
+    """What a dry run answers to "what would this deploy do?".
+
+    There are two summaries because there are two deployments: one for a machine
+    built from install media, one for a machine booted from a volume the pool
+    holds. They describe the same machine, so they used to print the same labels —
+    written twice, and free to drift. They are held here instead, in the order both
+    routes print them:
+
+        whose machine, on which hypervisor; the hardware; what it boots from; the
+        disc it reads its configuration from; the network; the pool; the firmware;
+        the screen; what an install would answer for; and last, what becomes of the
+        machine.
+
+    A route prints only the lines it has something to say for. The profile name is
+    an install's answer (a boot deploy takes memory and vCPU from it, both named by
+    the hardware line, and discards the disk it would imply, since the disk already
+    exists); the install media and the boot order are one route's each; the disk
+    size has no place in a boot summary for the same reason.
+
+    Two voices, deliberately. A fact about the machine is a label and a value
+    (`Network: default`). Something the deploy would *do*, that a caller could not
+    read off the machine, is written as what would happen (`… would be started`) —
+    so no line can be misread as something the dry run went and did.
+
+    Deliberately not passed through `_()`, for the reason given on `DeployText`:
+    these lines are the deploy surface's, printed as a log line under `--machine`
+    beside the answer of the same deploy, whose keys (`storage_pool`, `graphics`,
+    `memory_mb`) are English whatever the language. Translating the labels would
+    leave one deploy speaking two vocabularies.
+    """
+
+    HEADER = "\n--- Summary of Actions (dry run) ---"
+
+    # Whose machine, and on which hypervisor.
+    VM_NAME_TEMPLATE = "VM Name: {name}"
+    SERVER_TEMPLATE = "Server: {server}"
+    VM_TYPE_TEMPLATE = "VM Type: {vm_type}"
+
+    # The hardware the machine would be given. The disk is the one field only an
+    # install can name: a machine booted from a volume has no disk of its own to
+    # size, so the route that boots one prints the shorter line rather than a disk
+    # the file named and the deploy then ignored.
+    MEMORY_VCPU_TEMPLATE = "Memory: {memory_mb} MB, vCPU: {vcpu}"
+    MEMORY_VCPU_DISK_TEMPLATE = "Memory: {memory_mb} MB, vCPU: {vcpu}, Disk: {disk} GB"
+    DISK_SIZE_DEFAULT = "default"
+
+    # What the machine boots from: media it installs from, or a disk it already has.
+    ISO_TEMPLATE = "ISO: {iso}"
+    BOOT_VOLUME_TEMPLATE = "Boots the volume: {volume} ({format})"
+    # A pool that is down cannot be asked how a volume of it is formatted.
+    UNKNOWN_FORMAT = "unknown format"
+    OVERLAY_WOULD_BE_MADE_TEMPLATE = "  would be made as an overlay of: {backing}"
+    OVERLAY_IS_TEMPLATE = "  as an overlay of: {backing}"
+
+    # A read-only disc the guest reads its own configuration from.
+    SEED_TEMPLATE = "Seed CD-ROM: {seed}"
+
+    # Where the machine is plugged in, and where it lives. The two ways a pool shows
+    # up say different things, and both are said when both are true: which pool the
+    # machine lands in, and whether the deploy would have to bring that pool up
+    # first (which a dry run may not do, so it has to be said rather than done).
+    NETWORK_TEMPLATE = "Network: {network}"
+    STORAGE_POOL_TEMPLATE = "Storage Pool: {pool}"
+    POOL_WOULD_START_TEMPLATE = "Storage pool: {pool} would be started"
+
+    # The firmware and the screen the domain is defined with. `UEFI`/`BIOS` are the
+    # technical words AGENTS.md keeps out of the constants; the screen is what the
+    # file said, or this for a file that asked for none — one word for both routes,
+    # where the install route holds a `None` and the boot route a `"none"`.
+    BOOT_MODE_TEMPLATE = "Boot Mode: {mode}"
+    GRAPHICS_TEMPLATE = "Graphics: {graphics}"
+    NO_SCREEN = "none"
+
+    # Which of the disk and the cdrom the firmware tries first. Only the route that
+    # boots a disk has the choice to report: an install's media is what boots.
+    BOOT_ORDER_TEMPLATE = "Boot order: {boot}"
+
+    # An install's answers: the profile it would hand the media, and what is baked
+    # into that profile.
+    AUTOMATED_INSTALL_TEMPLATE = "Automated Install: Yes (Template: {template})"
+    AUTOMATED_INSTALL_NONE = "Automated Install: No"
+    EXTRA_PACKAGES_TEMPLATE = "Extra Packages: {packages}"
+    SCC_YES = "SCC Registration: Yes"
+    POST_INSTALL_TEMPLATE = "Post-install: Yes ({count} commands, baked into template)"
+
+    # How the deploy ends, which is the file's `start` and was named by neither
+    # summary: a deploy that leaves the machine running and one that leaves it
+    # defined and stopped are two different answers to the dry run's question.
+    MACHINE_WOULD_START = "The machine would be started once it is defined."
+    MACHINE_WOULD_NOT_START = "The machine would be left defined and stopped."
+
+
 class ProgressMessages:  # pylint: disable=too-few-public-methods
     """Constants for progress and in-progress status messages"""
 

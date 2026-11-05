@@ -27,7 +27,13 @@ import libvirt
 from . import machine_resources  # noqa: F401  registers the pool/volume/domain/host commands
 from .backup_manager import BackupManager, BackupOptions, BackupType
 from .config import get_log_path, load_config
-from .constants import AppInfo, DeployText, MachineProgressStage, ServerPalette
+from .constants import (
+    AppInfo,
+    DeploySummaryText,
+    DeployText,
+    MachineProgressStage,
+    ServerPalette,
+)
 from .libvirt_error_handler import register_error_handler
 from .libvirt_utils import get_host_resources, get_network_info
 from .machine_mode import (
@@ -4418,34 +4424,55 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         The machine itself comes from `plan`; `cfg` is here for the parts of the
         deploy file a plan does not carry: the profile name as written, and the
         packages and registration the automation profile was built from.
+
+        The words are `DeploySummaryText`'s, and so is the order of the lines: the
+        summary of the other deployment, the one that boots a volume, prints the
+        same labels in the same places and adds only what an install has no
+        equivalent of. A line about what the deploy would *do* rather than what the
+        machine would *be* says so (`_start_line`, the overlay, a pool to start).
         """
         automation_config = plan.automation_config
-        print("\n--- Summary of Actions (dry run) ---")
-        print(f"VM Name: {plan.vm_name}")
-        print(f"Server: {plan.server_name}")
-        print(f"VM Type: {cfg['vm_type']}")
-        disk = plan.disk_size_gb if plan.disk_size_gb else "default"
-        print(f"Memory: {plan.memory_mb} MB, vCPU: {plan.vcpu}, Disk: {disk} GB")
-        print(f"ISO: {iso_url}")
+        print(DeploySummaryText.HEADER)
+        print(DeploySummaryText.VM_NAME_TEMPLATE.format(name=plan.vm_name))
+        print(DeploySummaryText.SERVER_TEMPLATE.format(server=plan.server_name))
+        print(DeploySummaryText.VM_TYPE_TEMPLATE.format(vm_type=cfg["vm_type"]))
+        disk = plan.disk_size_gb or DeploySummaryText.DISK_SIZE_DEFAULT
+        print(
+            DeploySummaryText.MEMORY_VCPU_DISK_TEMPLATE.format(
+                memory_mb=plan.memory_mb, vcpu=plan.vcpu, disk=disk
+            )
+        )
+        print(DeploySummaryText.ISO_TEMPLATE.format(iso=iso_url))
         if cfg["seed_volume"]:
-            print(f"Seed CD-ROM: {cfg['seed_volume']}")
-        print(f"Network: {plan.network}")
-        print(f"Storage Pool: {plan.storage_pool}")
-        print(f"Boot Mode: {'UEFI' if plan.boot_uefi else 'BIOS'}")
-        print(f"Graphics: {plan.graphics}")
+            print(DeploySummaryText.SEED_TEMPLATE.format(seed=cfg["seed_volume"]))
+        print(DeploySummaryText.NETWORK_TEMPLATE.format(network=plan.network))
+        print(DeploySummaryText.STORAGE_POOL_TEMPLATE.format(pool=plan.storage_pool))
+        print(
+            DeploySummaryText.BOOT_MODE_TEMPLATE.format(mode="UEFI" if plan.boot_uefi else "BIOS")
+        )
+        print(DeploySummaryText.GRAPHICS_TEMPLATE.format(graphics=_graphics_word(plan)))
         if automation_config:
-            print(f"Automated Install: Yes (Template: {automation_config['template_name']})")
+            print(
+                DeploySummaryText.AUTOMATED_INSTALL_TEMPLATE.format(
+                    template=automation_config["template_name"]
+                )
+            )
             ai = cfg.get("autoinstall") or {}
             if ai.get("packages"):
-                print(f"Extra Packages: {', '.join(ai.get('packages', []))}")
+                print(
+                    DeploySummaryText.EXTRA_PACKAGES_TEMPLATE.format(
+                        packages=", ".join(ai.get("packages", []))
+                    )
+                )
             scc = ai.get("scc") or {}
             if any(scc.get(k) for k in ("scc_email", "scc_reg_code")):
-                print("SCC Registration: Yes")
+                print(DeploySummaryText.SCC_YES)
             pi = cfg.get("post_install") or {}
             if pi.get("commands"):
-                print(f"Post-install: Yes ({len(pi['commands'])} commands, baked into template)")
+                print(DeploySummaryText.POST_INSTALL_TEMPLATE.format(count=len(pi["commands"])))
         else:
-            print("Automated Install: No")
+            print(DeploySummaryText.AUTOMATED_INSTALL_NONE)
+        print(_start_line(cfg))
 
     @staticmethod
     def _volume_path(pool, name):
@@ -4567,22 +4594,50 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             graphics=graphics or "none",
         )
 
+        # The words are DeploySummaryText's, and so is their place: what an install
+        # summary says about the same machine, this one says the same way, in the
+        # same spot. Three lines here belong to this route alone — the volume it
+        # boots, the pool it would have to start to read that volume, and the boot
+        # order it would set — and the lines an install has that this one has no
+        # equivalent for (the profile name, the install media, the disk size) are
+        # simply absent: a machine booted from a volume has no template to report and
+        # no disk of its own to size, and a summary that printed `None` for either
+        # would be describing a deploy this file does not ask for.
         if dryrun:
-            print("\n--- Summary of Actions (dry run) ---")
-            print(f"VM Name: {vm_name}")
-            print(f"Server: {server_name}")
+            print(DeploySummaryText.HEADER)
+            print(DeploySummaryText.VM_NAME_TEMPLATE.format(name=vm_name))
+            print(DeploySummaryText.SERVER_TEMPLATE.format(server=server_name))
             if would_start_pool:
-                print(f"Storage pool: {pool_name} would be started")
-            print(f"Boots the volume: {disk_volume} ({disk_format or 'unknown format'})")
+                print(DeploySummaryText.POOL_WOULD_START_TEMPLATE.format(pool=pool_name))
+            print(
+                DeploySummaryText.MEMORY_VCPU_TEMPLATE.format(
+                    memory_mb=plan.memory_mb, vcpu=plan.vcpu
+                )
+            )
+            print(
+                DeploySummaryText.BOOT_VOLUME_TEMPLATE.format(
+                    volume=disk_volume, format=disk_format or DeploySummaryText.UNKNOWN_FORMAT
+                )
+            )
             if cfg["backing_volume"]:
-                verb = "would be made as" if would_create else "as"
-                print(f"  {verb} an overlay of: {cfg['backing_volume']}")
+                overlay = (
+                    DeploySummaryText.OVERLAY_WOULD_BE_MADE_TEMPLATE
+                    if would_create
+                    else DeploySummaryText.OVERLAY_IS_TEMPLATE
+                )
+                print(overlay.format(backing=cfg["backing_volume"]))
             if cfg["seed_volume"]:
-                print(f"Seed CD-ROM: {cfg['seed_volume']}")
-            print(f"Memory: {plan.memory_mb} MB, vCPU: {plan.vcpu}")
-            print(f"Network: {cfg['network']}")
-            print(f"Boot Mode: {'UEFI' if cfg['boot_uefi'] else 'BIOS'}")
-            print(f"Boot order: {cfg['boot']}")
+                print(DeploySummaryText.SEED_TEMPLATE.format(seed=cfg["seed_volume"]))
+            print(DeploySummaryText.NETWORK_TEMPLATE.format(network=cfg["network"]))
+            print(DeploySummaryText.STORAGE_POOL_TEMPLATE.format(pool=pool_name))
+            print(
+                DeploySummaryText.BOOT_MODE_TEMPLATE.format(
+                    mode="UEFI" if cfg["boot_uefi"] else "BIOS"
+                )
+            )
+            print(DeploySummaryText.GRAPHICS_TEMPLATE.format(graphics=_graphics_word(plan)))
+            print(DeploySummaryText.BOOT_ORDER_TEMPLATE.format(boot=cfg["boot"]))
+            print(_start_line(cfg))
 
             # What would be, and no more: no volume, no domain, nothing started.
             result = _deploy_result(plan, dryrun=True)
@@ -5344,6 +5399,32 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         if not text:
             return sorted(names)
         return [n for n in sorted(names) if n.startswith(text)]
+
+
+def _graphics_word(plan):
+    """The screen a deploy gives the machine, in the one word both summaries use.
+
+    `graphics` is carried from the file verbatim, so a file that asks for no screen
+    leaves the install route holding a `None` and the route that boots a volume
+    holding the word `"none"` it was settled to. Both mean the domain gets no
+    graphics device, and a summary that printed one on a line where the other
+    printed the other would read as two different machines.
+    """
+    return plan.graphics or DeploySummaryText.NO_SCREEN
+
+
+def _start_line(cfg):
+    """The last line of a dry run: what becomes of the machine once it is defined.
+
+    A deploy ends by booting the machine unless the file said `start: false`, which
+    is a different answer to "what would this do" than leaving it stopped — and it
+    is the file's own answer, read the same way each route reads it when it deploys.
+    """
+    return (
+        DeploySummaryText.MACHINE_WOULD_START
+        if cfg.get("start", True)
+        else DeploySummaryText.MACHINE_WOULD_NOT_START
+    )
 
 
 def _deploy_result(plan, dryrun=False, running=False, autoinstall=None):
