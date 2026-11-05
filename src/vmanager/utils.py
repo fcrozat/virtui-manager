@@ -815,12 +815,26 @@ def manage_firewalld_port(
 def get_ssh_host_from_uri(uri: str) -> Optional[str]:
     """
     Extracts the SSH host (user@host) from a libvirt URI.
+
+    A URI may carry its own credentials (``qemu+ssh://user:password@host``). The
+    password is dropped here, at the source, so that it cannot reach a log line or
+    the command line logged by ``run_command``. It is of no use anyway: ssh takes
+    its target as ``user@host`` and authenticates with keys, so a password in the
+    target spec only makes the connection fail.
     """
     if not uri or not uri.startswith("qemu+ssh://"):
         return None
     try:
         parsed_uri = urlparse(uri)
-        return parsed_uri.netloc
+        netloc = parsed_uri.netloc
+        if "@" not in netloc:
+            return netloc
+        # Split on the last "@" so that a password containing "@" stays on the
+        # userinfo side instead of being taken for the host.
+        userinfo, host = netloc.rsplit("@", 1)
+        # Keep the user, drop the ":password" that follows it.
+        user = userinfo.split(":", 1)[0]
+        return f"{user}@{host}" if user else host
     except Exception:
         return None
 
