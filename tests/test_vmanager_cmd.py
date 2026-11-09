@@ -5,6 +5,9 @@ Tests for VManagerCMD class.
 import io
 import json
 import os
+import re
+import shutil
+import socket
 import sys
 import tempfile
 import unittest
@@ -17,10 +20,11 @@ import libvirt
 # Add the src directory to the path to import vmanager modules
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
 
-from vmanager.vmanager_cmd import VManagerCMD
-from vmanager.deploy_config import DeployConfigError, load_deploy_config
-from vmanager.constants import AppInfo
+from vmanager.constants import AppInfo, DeploySummaryText, StaticText
+from vmanager.deploy_config import load_deploy_config
+from vmanager.machine_mode import EXIT_OK
 from vmanager.provisioning.os_provider import OSType
+from vmanager.vmanager_cmd import VManagerCMD
 
 
 class TestVManagerCMD(unittest.TestCase):
@@ -281,19 +285,22 @@ class TestVManagerCMD(unittest.TestCase):
         conn = MagicMock()
         self.cmd.active_connections["local"] = conn
         pool_mock = MagicMock()
-        with patch(
-            "vmanager.vmanager_cmd.list_storage_pools",
-            return_value=[{"name": "default", "pool": pool_mock}],
-        ), patch(
-            "vmanager.vmanager_cmd.list_storage_volumes",
-            return_value=[
-                {
-                    "name": "vol1.qcow2",
-                    "type": "file",
-                    "capacity": 10 * 1024**3,
-                    "allocation": 5 * 1024**3,
-                }
-            ],
+        with (
+            patch(
+                "vmanager.vmanager_cmd.list_storage_pools",
+                return_value=[{"name": "default", "pool": pool_mock}],
+            ),
+            patch(
+                "vmanager.vmanager_cmd.list_storage_volumes",
+                return_value=[
+                    {
+                        "name": "vol1.qcow2",
+                        "type": "file",
+                        "capacity": 10 * 1024**3,
+                        "allocation": 5 * 1024**3,
+                    }
+                ],
+            ),
         ):
             with redirect_stdout(io.StringIO()) as buf:
                 self.cmd.do_list_volumes("")
@@ -311,8 +318,9 @@ class TestVManagerCMD(unittest.TestCase):
         vol.name.return_value = "vol1.qcow2"
         user_vm = MagicMock()
         user_vm.name.return_value = "vm1"
-        with patch("vmanager.vmanager_cmd.find_volume", return_value=vol), patch(
-            "vmanager.vmanager_cmd.find_vms_using_volume", return_value=[user_vm]
+        with (
+            patch("vmanager.vmanager_cmd.find_volume", return_value=vol),
+            patch("vmanager.vmanager_cmd.find_vms_using_volume", return_value=[user_vm]),
         ):
             with redirect_stdout(io.StringIO()) as buf:
                 self.cmd.do_volume_usage("default vol1.qcow2")
@@ -346,16 +354,18 @@ class TestVManagerCMD(unittest.TestCase):
         """Test host_capabilities displays arch, CPU models and machine types."""
         conn = MagicMock()
         self.cmd.active_connections["local"] = conn
-        with patch("vmanager.vmanager_cmd.get_host_architecture", return_value="x86_64"), patch(
-            "vmanager.vmanager_cmd.get_cpu_models", return_value=["Haswell", "IvyBridge"]
-        ), patch(
-            "vmanager.vmanager_cmd.get_latest_machine_types",
-            return_value={"pc-i440fx": "pc.i440fx.8.1", "pc-q35": "pc.q35.8.1"},
-        ), patch(
-            "vmanager.vmanager_cmd.get_host_domain_capabilities", return_value=None
-        ), patch(
-            "vmanager.vmanager_cmd.get_video_domain_capabilities",
-            return_value={"video_models": ["virtio"]},
+        with (
+            patch("vmanager.vmanager_cmd.get_host_architecture", return_value="x86_64"),
+            patch("vmanager.vmanager_cmd.get_cpu_models", return_value=["Haswell", "IvyBridge"]),
+            patch(
+                "vmanager.vmanager_cmd.get_latest_machine_types",
+                return_value={"pc-i440fx": "pc.i440fx.8.1", "pc-q35": "pc.q35.8.1"},
+            ),
+            patch("vmanager.vmanager_cmd.get_host_domain_capabilities", return_value=None),
+            patch(
+                "vmanager.vmanager_cmd.get_video_domain_capabilities",
+                return_value={"video_models": ["virtio"]},
+            ),
         ):
             with redirect_stdout(io.StringIO()) as buf:
                 self.cmd.do_host_capabilities("")
@@ -576,145 +586,30 @@ class TestDeployFromConfig(unittest.TestCase):
         with patch("sys.stdout", MagicMock()):
             result = self.cmd._resolve_iso_url(prov, cfg)
         self.assertEqual(result, "https://x/24.3.iso")
-
-    def test_resolve_iso_url_repository_prefers_stored_url(self):
-        """When prepare_json captured an exact URL, it is used verbatim (no re-fetch)."""
-        prov = MagicMock()
-        cfg = {
-            "iso": {
-                "source": "repository",
-                "version": "24.3",
-                "url": "https://x/24.3-dvd.iso",
-            }
-        }
-        result = self.cmd._resolve_iso_url(prov, cfg)
-        self.assertEqual(result, "https://x/24.3-dvd.iso")
-        # The stored URL short-circuits resolution, so no re-fetch happens.
-        prov.get_iso_list.assert_not_called()
-
-    def test_deploy_from_config_dryrun(self):
-        import libvirt
-
-        cfg_path = self._write_cfg(
-            {
-                "server": "local",
-                "vm_name": "web01",
-                "vm_type": "server",
-                "memory_mb": 2048,
-                "vcpu": 1,
-                "iso": {"source": "url", "url": "https://x/y.iso"},
-                "autoinstall": {
-                    "enabled": True,
-                    "template": "autoyast-server.xml",
-                    "packages": ["ssh", "vim"],
-                    "scc": {"scc_email": "a@b.c", "scc_reg_code": "XYZ"},
-                },
-            }
-        )
-        conn = MagicMock()
-        conn.lookupByName.side_effect = self._no_domain_error()
-        self.cmd.active_connections["local"] = conn
-        self.cmd._connect_one = MagicMock(return_value="local")
-
-        with patch("vmanager.vmanager_cmd.ensure_default_pool", return_value=True), \
-            patch("vmanager.vmanager_cmd.ensure_default_network"), \
-            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov, \
-            patch("vmanager.vmanager_cmd.list_storage_pools"), \
-            patch("vmanager.vmanager_cmd.list_networks"), \
-            redirect_stdout(io.StringIO()) as buf:
-            self.cmd.deploy_from_config(cfg_path, dryrun=True)
-
-        out = buf.getvalue()
-        self.assertIn("Summary of Actions", out)
-        self.assertIn("web01", out)
-        self.assertIn("Automated Install: Yes", out)
-        self.assertIn("Extra Packages: ssh, vim", out)
-        self.assertIn("SCC Registration: Yes", out)
-        # provision_vm must NOT be called in dry-run
-        mock_prov.return_value.provision_vm.assert_not_called()
-
-    def test_deploy_from_config_vm_exists(self):
-        import libvirt
-
-        cfg_path = self._write_cfg(
-            {
-                "server": "local",
-                "vm_name": "web01",
-                "vm_type": "server",
-                "iso": {"source": "url", "url": "https://x/y.iso"},
-            }
-        )
+    def test_deploy_without_a_session_keeps_printing(self):
+        """A human still gets prose: nothing raises when nobody asked for JSON."""
         conn = MagicMock()
         conn.lookupByName.return_value = MagicMock()  # VM exists
         self.cmd.active_connections["local"] = conn
         self.cmd._connect_one = MagicMock(return_value="local")
+        cfg_path = self._write_cfg(
+            {
+                "server": "local",
+                "vm_name": "web01",
+                "vm_type": "server",
+                "iso": {"source": "url", "url": "https://x/y.iso"},
+            }
+        )
 
-        with patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov, \
-            redirect_stdout(io.StringIO()) as buf:
-            self.cmd.deploy_from_config(cfg_path)
+        with patch("vmanager.vmanager_cmd.VMProvisioner"), redirect_stdout(io.StringIO()) as buf:
+            self.assertIsNone(self.cmd.deploy_from_config(cfg_path))
 
         self.assertIn("already exists", buf.getvalue())
-        mock_prov.return_value.provision_vm.assert_not_called()
 
-    def test_deploy_from_config_passes_show_automation_path(self):
-        cfg_path = self._write_cfg(
-            {
-                "server": "local",
-                "vm_name": "web01",
-                "vm_type": "server",
-                "iso": {"source": "url", "url": "https://x/y.iso"},
-                "autoinstall": {
-                    "enabled": True,
-                    "template": "autoyast-server.xml",
-                    "packages": ["ssh"],
-                },
-            }
-        )
-        conn = MagicMock()
-        conn.lookupByName.side_effect = self._no_domain_error()
-        self.cmd.active_connections["local"] = conn
-        self.cmd._connect_one = MagicMock(return_value="local")
-
-        with patch("vmanager.vmanager_cmd.ensure_default_pool", return_value=True), \
-            patch("vmanager.vmanager_cmd.ensure_default_network"), \
-            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov, \
-            patch("vmanager.vmanager_cmd.list_storage_pools"), \
-            patch("vmanager.vmanager_cmd.list_networks"), \
-            redirect_stdout(io.StringIO()):
-            self.cmd.deploy_from_config(cfg_path)
-
-        # The generated auto-install file path must be surfaced to the user.
-        mock_prov.return_value.provision_vm.assert_called_once()
-        _, kwargs = mock_prov.return_value.provision_vm.call_args
-        self.assertTrue(kwargs.get("show_automation_path"))
-
-    def test_deploy_from_config_no_autoinstall_does_not_force_path(self):
-        cfg_path = self._write_cfg(
-            {
-                "server": "local",
-                "vm_name": "web01",
-                "vm_type": "server",
-                "iso": {"source": "url", "url": "https://x/y.iso"},
-            }
-        )
-        conn = MagicMock()
-        conn.lookupByName.side_effect = self._no_domain_error()
-        self.cmd.active_connections["local"] = conn
-        self.cmd._connect_one = MagicMock(return_value="local")
-
-        with patch("vmanager.vmanager_cmd.ensure_default_pool", return_value=True), \
-            patch("vmanager.vmanager_cmd.ensure_default_network"), \
-            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov, \
-            patch("vmanager.vmanager_cmd.list_storage_pools"), \
-            patch("vmanager.vmanager_cmd.list_networks"), \
-            redirect_stdout(io.StringIO()):
-            self.cmd.deploy_from_config(cfg_path)
-
-        mock_prov.return_value.provision_vm.assert_called_once()
-        _, kwargs = mock_prov.return_value.provision_vm.call_args
-        # No autoinstall -> no automation -> show_automation_path stays False.
-        self.assertFalse(kwargs.get("show_automation_path"))
-
+    def test_deploy_without_a_session_gives_no_result_when_it_failed(self):
+        """The exit status of `vmc --json` comes from this return value."""
+        with patch("sys.stdout", MagicMock()), redirect_stdout(io.StringIO()):
+            self.assertIsNone(self.cmd.deploy_from_config("/no/such/deploy.json"))
     def test_deploy_vm_no_args_shows_usage(self):
         with redirect_stdout(io.StringIO()) as buf:
             self.cmd.do_deploy_vm("")
@@ -816,24 +711,22 @@ class TestDeployFromConfig(unittest.TestCase):
         import json
 
         self.cmd.active_connections["local"] = MagicMock()
-        self.cmd._select_choice = MagicMock(
-            side_effect=["local", "custom", "UEFI", "spice", "yes"]
-        )
+        self.cmd._select_choice = MagicMock(side_effect=["local", "custom", "UEFI", "spice", "yes"])
         self.cmd._get_input = MagicMock(return_value="myvm")
         self.cmd._get_positive_float = MagicMock(return_value=2)  # 2 GB
         self.cmd._get_positive_int = MagicMock(side_effect=[1, 10])  # vcpu=1, disk=10
-        self.cmd._prepare_iso = MagicMock(
-            return_value={"source": "url", "url": "https://x/y.iso"}
-        )
+        self.cmd._prepare_iso = MagicMock(return_value={"source": "url", "url": "https://x/y.iso"})
         self.cmd._prepare_autoinstall = MagicMock(return_value=None)
         self.cmd._prepare_post_install = MagicMock(return_value=None)
 
         with tempfile.TemporaryDirectory() as d:
             out_path = str(Path(d) / "custom.json")
-            with patch("vmanager.vmanager_cmd.VMProvisioner"), \
-                patch("vmanager.vmanager_cmd.list_networks", return_value=[]), \
-                patch("vmanager.vmanager_cmd.list_storage_pools", return_value=[]), \
-                redirect_stdout(io.StringIO()):
+            with (
+                patch("vmanager.vmanager_cmd.VMProvisioner"),
+                patch("vmanager.vmanager_cmd.list_networks", return_value=[]),
+                patch("vmanager.vmanager_cmd.list_storage_pools", return_value=[]),
+                redirect_stdout(io.StringIO()),
+            ):
                 self.cmd.do_prepare_json(out_path)
             with open(out_path, encoding="utf-8") as f:
                 data = json.load(f)
@@ -853,18 +746,18 @@ class TestDeployFromConfig(unittest.TestCase):
         self.cmd._get_input = MagicMock(return_value="myvm")
         self.cmd._get_positive_float = MagicMock()
         self.cmd._get_positive_int = MagicMock()
-        self.cmd._prepare_iso = MagicMock(
-            return_value={"source": "url", "url": "https://x/y.iso"}
-        )
+        self.cmd._prepare_iso = MagicMock(return_value={"source": "url", "url": "https://x/y.iso"})
         self.cmd._prepare_autoinstall = MagicMock(return_value=None)
         self.cmd._prepare_post_install = MagicMock(return_value=None)
 
         with tempfile.TemporaryDirectory() as d:
             out_path = str(Path(d) / "profile.json")
-            with patch("vmanager.vmanager_cmd.VMProvisioner"), \
-                patch("vmanager.vmanager_cmd.list_networks", return_value=[]), \
-                patch("vmanager.vmanager_cmd.list_storage_pools", return_value=[]), \
-                redirect_stdout(io.StringIO()):
+            with (
+                patch("vmanager.vmanager_cmd.VMProvisioner"),
+                patch("vmanager.vmanager_cmd.list_networks", return_value=[]),
+                patch("vmanager.vmanager_cmd.list_storage_pools", return_value=[]),
+                redirect_stdout(io.StringIO()),
+            ):
                 self.cmd.do_prepare_json(out_path)
             with open(out_path, encoding="utf-8") as f:
                 data = json.load(f)
@@ -898,9 +791,7 @@ class TestDeployFromConfig(unittest.TestCase):
         self.cmd._select_choice = MagicMock(return_value="yes")
         self.cmd._get_input = MagicMock()
         self.cmd._get_password = MagicMock()
-        result = self.cmd._prepare_autoinstall_settings(
-            prefill, scc, "tmpl.xml", ["tmux"], "myvm"
-        )
+        result = self.cmd._prepare_autoinstall_settings(prefill, scc, "tmpl.xml", ["tmux"], "myvm")
         self.assertEqual(result["username"], "prefilluser")
         self.assertEqual(result["user_password"], "upw")
         self.assertEqual(result["root_password"], "rpw")
@@ -920,13 +811,9 @@ class TestDeployFromConfig(unittest.TestCase):
         scc = {"scc_email": "a@b.c", "scc_reg_code": "XYZ"}
         # 1st call (propose prefill) -> "no"; 2nd call (SCC register?) -> "no"
         self.cmd._select_choice = MagicMock(side_effect=["no", "no"])
-        self.cmd._get_input = MagicMock(
-            side_effect=["askeduser", "Europe/Zurich", "ch", "German"]
-        )
+        self.cmd._get_input = MagicMock(side_effect=["askeduser", "Europe/Zurich", "ch", "German"])
         self.cmd._get_password = MagicMock(side_effect=["askedupw", "askedrpw"])
-        result = self.cmd._prepare_autoinstall_settings(
-            prefill, scc, "tmpl.xml", [], "myvm"
-        )
+        result = self.cmd._prepare_autoinstall_settings(prefill, scc, "tmpl.xml", [], "myvm")
         self.assertEqual(result["username"], "askeduser")
         self.assertEqual(result["user_password"], "askedupw")
         self.assertEqual(result["root_password"], "askedrpw")
@@ -938,13 +825,9 @@ class TestDeployFromConfig(unittest.TestCase):
     def test_autoinstall_settings_asks_when_no_prefill(self):
         # No pre-fill at all: no proposal shown, fields asked directly.
         self.cmd._select_choice = MagicMock(return_value="no")  # SCC register?
-        self.cmd._get_input = MagicMock(
-            side_effect=["askeduser", "UTC", "us", "English (US)"]
-        )
+        self.cmd._get_input = MagicMock(side_effect=["askeduser", "UTC", "us", "English (US)"])
         self.cmd._get_password = MagicMock(side_effect=["askedupw", "askedrpw"])
-        result = self.cmd._prepare_autoinstall_settings(
-            {}, {}, "tmpl.xml", [], "myvm"
-        )
+        result = self.cmd._prepare_autoinstall_settings({}, {}, "tmpl.xml", [], "myvm")
         self.assertEqual(result["username"], "askeduser")
         self.assertEqual(result["scc"], {})
         # No "use pre-fill" proposal when there is nothing to propose
@@ -957,9 +840,7 @@ class TestDeployFromConfig(unittest.TestCase):
         self.cmd._select_choice = MagicMock(return_value="yes")
         self.cmd._get_input = MagicMock()
         self.cmd._get_password = MagicMock()
-        result = self.cmd._prepare_autoinstall_settings(
-            prefill, {}, "tmpl.xml", [], "myvm"
-        )
+        result = self.cmd._prepare_autoinstall_settings(prefill, {}, "tmpl.xml", [], "myvm")
         self.assertEqual(result["username"], "onlyuser")
         self.assertEqual(result["user_password"], "")
         self.cmd._get_input.assert_not_called()
@@ -979,6 +860,135 @@ class TestDeployFromConfig(unittest.TestCase):
         self.assertEqual(result, {})
         self.cmd._get_input.assert_not_called()
         self.cmd._get_password.assert_not_called()
+
+
+class TestUriOption(unittest.TestCase):
+    """Tests for ``vmc -u/--uri``, the hypervisor a scripted caller names."""
+
+    @patch("vmanager.vmanager_cmd.load_config")
+    @patch("vmanager.vmanager_cmd.get_log_path")
+    @patch("vmanager.vmanager_cmd.CLILogger")
+    def setUp(self, mock_logger, mock_log_path, mock_load_config):
+        mock_load_config.return_value = {
+            "servers": [
+                {"name": "local", "uri": "qemu:///system", "autoconnect": True},
+                {"name": "other", "uri": "qemu+ssh://user@other/system", "autoconnect": True},
+            ]
+        }
+        mock_log_path.return_value = "/tmp/vmanager_test.log"
+        self.mock_vm_service = MagicMock()
+        with patch("sys.stdout", MagicMock()):
+            self.cmd = VManagerCMD(vm_service=self.mock_vm_service)
+
+    def test_without_uri_the_configured_servers_connect(self):
+        self.mock_vm_service.connect.return_value = MagicMock()
+        with patch("sys.stdout", MagicMock()):
+            self.cmd._perform_autoconnect()
+        self.assertEqual(self.mock_vm_service.connect.call_count, 2, "both autoconnect servers")
+
+    def test_uri_connects_to_that_hypervisor_only(self):
+        self.mock_vm_service.connect.return_value = MagicMock()
+        self.cmd.default_uri = "qemu+ssh://root@h1/system"
+        with patch("sys.stdout", MagicMock()):
+            self.cmd._perform_autoconnect()
+        self.mock_vm_service.connect.assert_called_once_with("qemu+ssh://root@h1/system")
+        self.assertIn("h1", self.cmd.active_connections)
+        self.assertIn("h1", self.cmd.selected_vms)
+
+    def test_uri_replaces_the_server_of_a_deployment_file(self):
+        """``-u`` wins over the file, so one file can go to any hypervisor."""
+        calls = []
+
+        def stop(server):
+            calls.append(server)
+            raise RuntimeError("enough of the deployment")
+
+        self.cmd._connect_one = stop
+        cfg = self._write_cfg(
+            {
+                "server": "local",
+                "vm_name": "v",
+                "vm_type": "custom",
+                "memory_mb": 2048,
+                "vcpu": 2,
+                "disk_size_gb": 20,
+                "iso": {"source": "url", "url": "http://h/SLE-15-SP1.iso"},
+            }
+        )
+        self.cmd.default_uri = "qemu:///system"
+        with patch("sys.stdout", MagicMock()), self.assertRaises(RuntimeError):
+            self.cmd.deploy_from_config(cfg)
+        self.assertEqual(calls, ["qemu:///system"])
+
+    def test_a_file_that_names_no_server_is_a_bad_file_even_with_a_uri(self):
+        """``-u`` replaces the file's server; it does not remove the requirement.
+
+        The file is checked the same way whether or not ``-u`` was given, so the same
+        bytes are not a bad file in one call and a good one in the next. Refusing it
+        is also what happens first: nothing is connected to on the way to telling the
+        caller their file is wrong.
+        """
+        cfg = self._write_cfg(
+            {
+                "vm_name": "v",
+                "vm_type": "server",
+                "iso": {"source": "url", "url": "http://h/SLE-15-SP1.iso"},
+            }
+        )
+        self.cmd.default_uri = "qemu:///system"
+        self.cmd._connect_one = MagicMock(return_value="local")
+
+        with patch("sys.stdout", MagicMock()), redirect_stdout(io.StringIO()) as out:
+            result = self.cmd.deploy_from_config(cfg)
+
+        self.assertIsNone(result, "a refused deployment answers with nothing deployed")
+        self.cmd._connect_one.assert_not_called()
+        self.assertIn("server", out.getvalue())
+
+    def test_the_answer_names_the_hypervisor_the_override_used(self):
+        """A caller can see the override took effect: `server` says where it went."""
+        import libvirt
+
+        class NoDomainError(libvirt.libvirtError):
+            def get_error_code(self):
+                return libvirt.VIR_ERR_NO_DOMAIN
+
+        cfg = self._write_cfg(
+            {
+                "server": "local",  # the file names one hypervisor ...
+                "vm_name": "v",
+                "vm_type": "server",
+                "iso": {"source": "url", "url": "http://h/SLE-15-SP1.iso"},
+            }
+        )
+        self.cmd.default_uri = "qemu+ssh://root@h1/system"  # ... and -u sends it elsewhere
+        conn = MagicMock()
+        conn.lookupByName.side_effect = NoDomainError("no domain")
+        self.cmd.active_connections["h1"] = conn
+        self.cmd._connect_one = MagicMock(return_value="h1")
+        with (
+            patch("vmanager.vmanager_cmd.ensure_default_pool", return_value=True),
+            patch("vmanager.vmanager_cmd.ensure_default_network"),
+            patch("vmanager.vmanager_cmd.list_storage_pools"),
+            patch("vmanager.vmanager_cmd.list_networks"),
+            patch("vmanager.vmanager_cmd.VMProvisioner") as mock_prov,
+            patch("sys.stdout", MagicMock()),
+            redirect_stdout(io.StringIO()),
+        ):
+            mock_prov.return_value.provision_vm.return_value = MagicMock()
+            result = self.cmd.deploy_from_config(cfg)
+
+        self.assertEqual(result["server"], "h1")
+
+    def _write_cfg(self, obj):
+        import json
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(obj, f)
+            path = f.name
+        self.addCleanup(os.unlink, path)
+        return path
 
 
 class TestWriteJson(unittest.TestCase):
@@ -1028,7 +1038,9 @@ class TestWriteJson(unittest.TestCase):
             out_path = str(Path("~") / ".config" / "virtui-manager" / "deploy" / "x.json")
             with redirect_stdout(io.StringIO()):
                 self.cmd._write_json(out_path, {"vm_name": "x"})
-            self.assertTrue((Path(fake_home) / ".config" / "virtui-manager" / "deploy" / "x.json").exists())
+            self.assertTrue(
+                (Path(fake_home) / ".config" / "virtui-manager" / "deploy" / "x.json").exists()
+            )
 
     def test_write_json_round_trip_through_validator(self):
         """A config written by ``_write_json`` must load cleanly via the validator."""
@@ -1110,8 +1122,10 @@ class TestListShowJson(unittest.TestCase):
                     "other.json": {"vm_name": "other"},
                 },
             )
-            with patch("vmanager.vmanager_cmd.Path.home", return_value=home), \
-                redirect_stdout(io.StringIO()) as buf:
+            with (
+                patch("vmanager.vmanager_cmd.Path.home", return_value=home),
+                redirect_stdout(io.StringIO()) as buf,
+            ):
                 self.cmd.do_list_json("")
             out = buf.getvalue()
             self.assertIn("web01.json", out)
@@ -1122,8 +1136,10 @@ class TestListShowJson(unittest.TestCase):
     def test_list_json_no_dir(self):
         with tempfile.TemporaryDirectory() as d:
             home = Path(d)  # deploy dir intentionally not created
-            with patch("vmanager.vmanager_cmd.Path.home", return_value=home), \
-                redirect_stdout(io.StringIO()) as buf:
+            with (
+                patch("vmanager.vmanager_cmd.Path.home", return_value=home),
+                redirect_stdout(io.StringIO()) as buf,
+            ):
                 self.cmd.do_list_json("")
             self.assertIn("No deployment JSON files found", buf.getvalue())
 
@@ -1131,19 +1147,21 @@ class TestListShowJson(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             home = Path(d)
             (home / ".config" / "virtui-manager" / "deploy").mkdir(parents=True)
-            with patch("vmanager.vmanager_cmd.Path.home", return_value=home), \
-                redirect_stdout(io.StringIO()) as buf:
+            with (
+                patch("vmanager.vmanager_cmd.Path.home", return_value=home),
+                redirect_stdout(io.StringIO()) as buf,
+            ):
                 self.cmd.do_list_json("")
             self.assertIn("No deployment JSON files found", buf.getvalue())
 
     def test_show_json_by_name(self):
         with tempfile.TemporaryDirectory() as d:
-            home = self._make_deploy(
-                d, {"web01.json": {"vm_name": "web01", "vm_type": "server"}}
-            )
-            with patch("vmanager.vmanager_cmd.Path.home", return_value=home), \
-                redirect_stdout(io.StringIO()) as buf:
-                    self.cmd.do_show_json("web01.json")
+            home = self._make_deploy(d, {"web01.json": {"vm_name": "web01", "vm_type": "server"}})
+            with (
+                patch("vmanager.vmanager_cmd.Path.home", return_value=home),
+                redirect_stdout(io.StringIO()) as buf,
+            ):
+                self.cmd.do_show_json("web01.json")
             out = buf.getvalue()
             payload = out[out.index("{") : out.rindex("}") + 1]
             self.assertEqual(json.loads(payload)["vm_name"], "web01")
@@ -1152,9 +1170,11 @@ class TestListShowJson(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             home = self._make_deploy(d, {"web01.json": {"vm_name": "web01"}})
             path = home / ".config" / "virtui-manager" / "deploy" / "web01.json"
-            with patch("vmanager.vmanager_cmd.Path.home", return_value=home), \
-                redirect_stdout(io.StringIO()) as buf:
-                    self.cmd.do_show_json(str(path))
+            with (
+                patch("vmanager.vmanager_cmd.Path.home", return_value=home),
+                redirect_stdout(io.StringIO()) as buf,
+            ):
+                self.cmd.do_show_json(str(path))
             self.assertIn("web01", buf.getvalue())
 
     def test_show_json_sanitizes_sensitive_data(self):
@@ -1173,13 +1193,15 @@ class TestListShowJson(unittest.TestCase):
                                 "scc_reg_code": "ABCDEF-123456",
                                 "scc_we_reg_code": "WE-999999",
                             },
-                        }
+                        },
                     }
                 },
             )
-            with patch("vmanager.vmanager_cmd.Path.home", return_value=home), \
-                redirect_stdout(io.StringIO()) as buf:
-                    self.cmd.do_show_json("web01.json")
+            with (
+                patch("vmanager.vmanager_cmd.Path.home", return_value=home),
+                redirect_stdout(io.StringIO()) as buf,
+            ):
+                self.cmd.do_show_json("web01.json")
             out = buf.getvalue()
             # The plaintext password must not leak into the output.
             self.assertNotIn("SuperSecret123", out)
@@ -1195,9 +1217,11 @@ class TestListShowJson(unittest.TestCase):
     def test_show_json_not_found(self):
         with tempfile.TemporaryDirectory() as d:
             home = Path(d)
-            with patch("vmanager.vmanager_cmd.Path.home", return_value=home), \
-                redirect_stdout(io.StringIO()) as buf:
-                    self.cmd.do_show_json("nope.json")
+            with (
+                patch("vmanager.vmanager_cmd.Path.home", return_value=home),
+                redirect_stdout(io.StringIO()) as buf,
+            ):
+                self.cmd.do_show_json("nope.json")
             self.assertIn("not found", buf.getvalue())
 
     def test_show_json_no_arg(self):
@@ -1211,9 +1235,11 @@ class TestListShowJson(unittest.TestCase):
             deploy = home / ".config" / "virtui-manager" / "deploy"
             deploy.mkdir(parents=True)
             (deploy / "bad.json").write_text("{not valid json", encoding="utf-8")
-            with patch("vmanager.vmanager_cmd.Path.home", return_value=home), \
-                redirect_stdout(io.StringIO()) as buf:
-                    self.cmd.do_show_json("bad.json")
+            with (
+                patch("vmanager.vmanager_cmd.Path.home", return_value=home),
+                redirect_stdout(io.StringIO()) as buf,
+            ):
+                self.cmd.do_show_json("bad.json")
             self.assertIn("Invalid JSON", buf.getvalue())
 
     def test_complete_show_json(self):
